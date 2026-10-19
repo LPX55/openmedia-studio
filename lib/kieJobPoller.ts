@@ -33,12 +33,20 @@ export function isPolling(taskId: string): boolean {
 export function pollKieJob(taskId: string, apiKey: string, kind: Kind): void {
   if (!taskId || active.has(taskId)) return;
   active.add(taskId);
-  void loop(taskId, apiKey, kind)
-    .catch((e) => {
-      console.error(`[kie-poller] ${taskId} crashed:`, e);
-      settle(taskId, kind, { status: "error", error: "Generation failed (poller error)" });
-    })
-    .finally(() => active.delete(taskId));
+  void runKiePollLoop(taskId, apiKey, kind).finally(() => active.delete(taskId));
+}
+
+/**
+ * Additive export for lib/jobManager: the exact same loop pollKieJob runs
+ * (3s interval, 12-min deadline), returned as a Promise that resolves once the
+ * job has reached a terminal state — it always does, the deadline settles it.
+ * pollKieJob's API and settle behavior are unchanged.
+ */
+export function runKiePollLoop(taskId: string, apiKey: string, kind: Kind): Promise<void> {
+  return loop(taskId, apiKey, kind).catch((e) => {
+    console.error(`[kie-poller] ${taskId} crashed:`, e);
+    settle(taskId, kind, { status: "error", error: "Generation failed (poller error)" });
+  });
 }
 
 // Local-only providers mint prefixed task IDs (`azure-…`, `codex-…`) and have no

@@ -73,6 +73,16 @@ function createSchema(d: DatabaseSync): void {
       id TEXT PRIMARY KEY, name TEXT, data TEXT, updated_at INTEGER
     );
   `);
+
+  // Provider-refactor Phase 2 migration (design.md §3.1) — idempotent: fresh
+  // databases get the columns via ALTER like everyone else, existing ones are
+  // checked with PRAGMA table_info first. provider_meta holds the C3 pinned
+  // JSON shape `{ upstreamTaskId, family, statusUrl, responseUrl?, upstreamModelId }`.
+  const genCols = new Set(
+    (d.prepare("PRAGMA table_info(generations)").all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  if (!genCols.has("provider_id"))   d.exec("ALTER TABLE generations ADD COLUMN provider_id TEXT;");
+  if (!genCols.has("provider_meta")) d.exec("ALTER TABLE generations ADD COLUMN provider_meta TEXT;");
 }
 
 // ── one-time JSON import ────────────────────────────────────────────────────

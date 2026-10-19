@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from "crypto";
 import { db } from "./sqlite";
+import type { ProviderMeta } from "../jobStore";
 
 /**
  * Guest-mode data access. SQLite-backed (see ./sqlite), but the exported API is
@@ -27,6 +28,8 @@ interface Generation {
   error_msg?: string;
   created_at: string;
   updated_at: string;
+  provider_id?: string;
+  provider_meta?: ProviderMeta;
 }
 
 interface Upload {
@@ -59,6 +62,8 @@ interface FolderItemRecord {
 const now = (): string => new Date().toISOString();
 const parseArr = (v: unknown): string[] | undefined =>
   typeof v === "string" && v ? (JSON.parse(v) as string[]) : undefined;
+const parseProviderMeta = (v: unknown): ProviderMeta | undefined =>
+  typeof v === "string" && v ? (JSON.parse(v) as ProviderMeta) : undefined;
 
 type GenRow = Record<string, unknown>;
 function rowToGeneration(r: GenRow): Generation {
@@ -83,6 +88,8 @@ function rowToGeneration(r: GenRow): Generation {
     error_msg: (r.error_msg as string) ?? undefined,
     created_at: r.created_at as string,
     updated_at: r.updated_at as string,
+    provider_id: (r.provider_id as string) ?? undefined,
+    provider_meta: parseProviderMeta(r.provider_meta),
   };
 }
 
@@ -99,8 +106,9 @@ export function insertGeneration(data: Omit<Generation, "id" | "created_at" | "u
       INSERT INTO generations
         (id, user_id, task_id, generation_type, status, prompt, model, aspect_ratio,
          quality, azure_resolution, duration, kling_mode, sound, reference_image_urls,
-         image_url, image_urls, video_url, error_msg, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         image_url, image_urls, video_url, error_msg, created_at, updated_at,
+         provider_id, provider_meta)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(task_id) DO NOTHING
     `)
     .run(
@@ -111,6 +119,8 @@ export function insertGeneration(data: Omit<Generation, "id" | "created_at" | "u
       data.reference_image_urls ? JSON.stringify(data.reference_image_urls) : null,
       data.image_url ?? null, data.image_urls ? JSON.stringify(data.image_urls) : null,
       data.video_url ?? null, data.error_msg ?? null, ts, ts,
+      data.provider_id ?? null,
+      data.provider_meta ? JSON.stringify(data.provider_meta) : null,
     );
 }
 
@@ -131,7 +141,10 @@ export function updateGeneration(
 
 export function recoverJob(
   taskId: string,
-): Pick<Generation, "status" | "video_url" | "image_url" | "image_urls" | "error_msg"> | null {
+): Pick<
+  Generation,
+  "status" | "generation_type" | "video_url" | "image_url" | "image_urls" | "error_msg" | "provider_id" | "provider_meta"
+> | null {
   const r = db().prepare("SELECT * FROM generations WHERE task_id = ?").get(taskId) as GenRow | undefined;
   return r ? rowToGeneration(r) : null;
 }

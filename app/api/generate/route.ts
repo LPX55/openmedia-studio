@@ -6,10 +6,11 @@ import { writeFile, unlink, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, normalize } from "node:path";
 import { MEDIA_DIR } from "@/lib/guest/paths";
-import { jobStore } from "@/lib/jobStore";
+import { jobStore, type ProviderMeta } from "@/lib/jobStore";
+import { registerSubmit, settleJob } from "@/lib/jobManager";
 import { pollKieJob } from "@/lib/kieJobPoller";
 import { ensureKieReachableImages } from "@/lib/kieUpload";
-import { ensureR2, uploadBuffer } from "@/lib/storage";
+import { ensureR2 } from "@/lib/storage";
 import { IMAGE_MODELS, validateAzureCustomSize } from "@/lib/modelConfig";
 import { getKieTokenForUser } from "@/lib/getKieToken";
 import { getAzureKeyForUser } from "@/lib/getAzureKey";
@@ -341,11 +342,26 @@ export async function POST(req: NextRequest) {
     const truncatedPrompt = prompt.slice(0, cfg.apiInput.promptMaxLength ?? 32000);
 
     const azureTaskId = `azure-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    jobStore.set(azureTaskId, { status: "pending", type: "image", userId: currentUserId ?? undefined });
+    jobStore.set(azureTaskId, { status: "pending", type: "image", userId: currentUserId ?? undefined, providerId: "azure" });
 
     const azureUserId = currentUserId;
 
     const hasRefImages = r2ImageUrls.length > 0;
+
+    // Pre-insert the pending row BEFORE the upstream call (design.md §2.1) so
+    // a crash mid-submit can't orphan the job; settleJob updates it on completion.
+    guestDb.insertGeneration({
+      task_id: azureTaskId, user_id: azureUserId, generation_type: "image",
+      status: "pending", prompt: prompt.slice(0, 2000),
+      model, aspect_ratio: aspectRatio, quality,
+      azure_resolution: azureResolution,
+      reference_image_urls: hasRefImages ? r2ImageUrls : undefined,
+      provider_id: "azure",
+    });
+
+    // C2: mark the submit live — released ONLY when settleJob runs, so the
+    // client's first status poll can't false-kill a job that's still running.
+    registerSubmit(azureTaskId);
 
     (async () => {
       try {
@@ -413,32 +429,26 @@ export async function POST(req: NextRequest) {
             };
             displayError = code ? (friendlyErrors[code] ?? code) : displayError;
           } catch { /* not JSON */ }
-          jobStore.set(azureTaskId, { status: "error", error: displayError });
+          await settleJob(azureTaskId, "image", "azure", { status: "error", error: displayError });
           return;
         }
 
         const azureJson = JSON.parse(txt);
         const b64 = azureJson?.data?.[0]?.b64_json as string | undefined;
         if (!b64) {
-          jobStore.set(azureTaskId, { status: "error", error: "Azure returned no image data" });
+          await settleJob(azureTaskId, "image", "azure", { status: "error", error: "Azure returned no image data" });
           return;
         }
 
-        const buf      = Buffer.from(b64, "base64");
-        const imageUrl = await uploadBuffer(buf, "image/png", "generated");
-        jobStore.set(azureTaskId, { status: "done", imageUrl });
-
-        guestDb.insertGeneration({
-          task_id: azureTaskId, user_id: azureUserId, generation_type: "image",
-          status: "done", image_url: imageUrl, prompt: prompt.slice(0, 2000),
-          model, aspect_ratio: aspectRatio, quality,
-          azure_resolution: azureResolution,
-          reference_image_urls: hasRefImages ? r2ImageUrls : undefined,
+        const buf = Buffer.from(b64, "base64");
+        await settleJob(azureTaskId, "image", "azure", {
+          status: "done",
+          buffers: [{ buffer: buf, mimeType: "image/png" }],
         });
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error("[azure] background error:", msg, e);
-        jobStore.set(azureTaskId, { status: "error", error: msg });
+        await settleJob(azureTaskId, "image", "azure", { status: "error", error: msg });
       }
     })();
 
@@ -450,10 +460,22 @@ export async function POST(req: NextRequest) {
   // session on this host — so there's no key lookup here, unlike the other branches.
   if (codexProvider) {
     const codexTaskId = `codex-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    jobStore.set(codexTaskId, { status: "pending", type: "image", userId: currentUserId ?? undefined });
+    jobStore.set(codexTaskId, { status: "pending", type: "image", userId: currentUserId ?? undefined, providerId: "codex" });
 
     const codexUserId = currentUserId;
     const size = CODEX_SIZE_MAP[aspectRatio] ?? "auto";
+
+    // Pre-insert the pending row BEFORE the CLI runs (design.md §2.1);
+    // settleJob updates it on completion.
+    guestDb.insertGeneration({
+      task_id: codexTaskId, user_id: codexUserId, generation_type: "image",
+      status: "pending", prompt: prompt.slice(0, 2000),
+      model, aspect_ratio: aspectRatio, quality,
+      provider_id: "codex",
+    });
+
+    // C2: mark the submit live — released ONLY when settleJob runs.
+    registerSubmit(codexTaskId);
 
     // "<<<image N>>>" tags are an in-text convention other providers resolve to a
     // URL; codex-imagegen takes images as separate file args, so just flatten the
@@ -477,19 +499,15 @@ export async function POST(req: NextRequest) {
           }),
         );
 
-        const outBuf   = await runCodexImagegen({ prompt: codexPrompt, images, size });
-        const imageUrl = await uploadBuffer(outBuf, "image/png", "generated");
-        jobStore.set(codexTaskId, { status: "done", imageUrl });
-
-        guestDb.insertGeneration({
-          task_id: codexTaskId, user_id: codexUserId, generation_type: "image",
-          status: "done", image_url: imageUrl, prompt: prompt.slice(0, 2000),
-          model, aspect_ratio: aspectRatio, quality,
+        const outBuf = await runCodexImagegen({ prompt: codexPrompt, images, size });
+        await settleJob(codexTaskId, "image", "codex", {
+          status: "done",
+          buffers: [{ buffer: outBuf, mimeType: "image/png" }],
         });
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error("[codex] background error:", msg, e);
-        jobStore.set(codexTaskId, { status: "error", error: cleanCodexError(msg) });
+        await settleJob(codexTaskId, "image", "codex", { status: "error", error: cleanCodexError(msg) });
       }
     })();
 
@@ -549,12 +567,23 @@ export async function POST(req: NextRequest) {
     const taskId = d.data?.taskId ?? d.data?.id ?? d.taskId ?? d.id;
     if (!taskId) throw new Error("No task ID in response");
 
-    jobStore.set(taskId, { status: "pending", userId: currentUserId ?? undefined });
+    // Kie stays upstream-first until the Phase-4 uniform pre-mint (residual
+    // risk 4) — but its pending row is now tagged with the provider so
+    // jobManager.resumeJob can restart the poll loop after a restart.
+    const providerMeta: ProviderMeta = {
+      upstreamTaskId: taskId,
+      family: "standard",
+      statusUrl: `${BASE}/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`,
+      upstreamModelId: resolvedApiId,
+    };
+
+    jobStore.set(taskId, { status: "pending", userId: currentUserId ?? undefined, providerId: "kie", providerMeta });
 
     guestDb.insertGeneration({
       task_id: taskId, user_id: currentUserId, generation_type: "image",
       status: "pending", prompt, model, aspect_ratio: aspectRatio, quality,
       reference_image_urls: r2ImageUrls,
+      provider_id: "kie", provider_meta: providerMeta,
     });
     pollKieJob(taskId, kieToken, "image");
 

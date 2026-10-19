@@ -23,8 +23,18 @@ export function db(): DatabaseSync {
   const database = new DatabaseSync(DB_PATH);
   database.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   createSchema(database);
+  try {
+    migrateFromJson(database);
+    migrateLegacyProviderSettings(database);
+  } catch (e) {
+    // O5 cond.2 — assign `_db` only AFTER both migrations succeed, so a throw
+    // never memoizes a half-migrated DB (which would keep the legacy key in
+    // `settings`, unreadable → effective key loss). Release the handle so the
+    // next call retries from a clean connection instead of a poisoned one.
+    try { database.close(); } catch { /* already closed */ }
+    throw e;
+  }
   _db = database;
-  migrateFromJson(database);
   return _db;
 }
 
@@ -71,6 +81,26 @@ function createSchema(d: DatabaseSync): void {
 
     CREATE TABLE IF NOT EXISTS spaces (
       id TEXT PRIMARY KEY, name TEXT, data TEXT, updated_at INTEGER
+    );
+
+    -- Phase 3 provider store (design.md §3.1): single config table per provider.
+    CREATE TABLE IF NOT EXISTS provider_configs (
+      provider_id TEXT PRIMARY KEY,
+      api_key TEXT,
+      base_url TEXT,
+      extra_json TEXT,
+      updated_at TEXT
+    );
+
+    -- C6 — ONE table for model→provider state (active prefs + custom bindings).
+    CREATE TABLE IF NOT EXISTS model_bindings (
+      model_id TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      binding_json TEXT,
+      is_active INTEGER NOT NULL DEFAULT 0,
+      is_custom INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT,
+      PRIMARY KEY (model_id, provider_id)
     );
   `);
 
@@ -135,6 +165,57 @@ function migrateFromJson(d: DatabaseSync): void {
   }
 }
 
+// ── one-time legacy provider-key migration (C7a) ───────────────────────────
+//
+// Copies `settings.kie_api_token` / `settings.azure_api_key` into
+// `provider_configs` exactly once, guarded by the marker row
+// `settings.provider_configs_migrated` (= 'v1'). The legacy rows are DELETED and
+// the marker is written in the same transaction, so the copy never re-runs —
+// a key cleared via `DELETE /api/settings/providers?providerId=…` stays
+// deleted across restarts (no resurrection). All later reads/writes go
+// through `provider_configs` (see lib/guest/db.ts).
+// `settings.provider_configs_migrated` — the frozen design §3.1 marker name
+// (renamed from `_migrated_provider_configs_v1` to match design; presence-based
+// semantics are unchanged). Value is written as 'v1' below.
+const PROVIDER_MIGRATION_MARKER = "provider_configs_migrated";
+
+function migrateLegacyProviderSettings(d: DatabaseSync): void {
+  const marker = d
+    .prepare("SELECT value FROM settings WHERE key = ?")
+    .get(PROVIDER_MIGRATION_MARKER) as { value: string } | undefined;
+  if (marker) return;
+
+  const readLegacy = (key: string): string | null => {
+    const r = d.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
+      | { value: string | null }
+      | undefined;
+    return r?.value ?? null;
+  };
+
+  const copy = d.prepare(`
+    INSERT INTO provider_configs (provider_id, api_key, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(provider_id) DO NOTHING
+  `);
+  const ts = new Date().toISOString();
+
+  d.exec("BEGIN");
+  try {
+    const kie = readLegacy("kie_api_token");
+    if (kie) copy.run("kie", kie, ts);
+    const azure = readLegacy("azure_api_key");
+    if (azure) copy.run("azure", azure, ts);
+    d.prepare("DELETE FROM settings WHERE key IN ('kie_api_token', 'azure_api_key')").run();
+    d.prepare(
+      "INSERT INTO settings (key, value) VALUES (?, 'v1') ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    ).run(PROVIDER_MIGRATION_MARKER);
+    d.exec("COMMIT");
+    if (kie || azure) console.log("[guest/sqlite] migrated legacy provider keys to provider_configs");
+  } catch (e) {
+    d.exec("ROLLBACK");
+    throw e;
+  }
+}
+
 interface JsonDb {
   generations?: Record<string, unknown>[];
   uploads?: Record<string, unknown>[];
@@ -146,7 +227,21 @@ interface JsonDb {
 
 function importGuestDbJson(d: DatabaseSync, data: JsonDb): void {
   d.exec("BEGIN");
+  try {
+    importGuestDbJsonTx(d, data);
+    d.exec("COMMIT");
+  } catch (e) {
+    // O5 cond.2 — a mid-import throw must not leave this transaction open.
+    // `migrateFromJson` swallows the error and `db()` carries on into the
+    // provider migration, whose own `BEGIN` would otherwise throw "cannot
+    // start a transaction within a transaction" and hard-fail `db()`.
+    // Roll back so a failed JSON import can never make `db()` unusable.
+    try { d.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+    throw e;
+  }
+}
 
+function importGuestDbJsonTx(d: DatabaseSync, data: JsonDb): void {
   const genStmt = d.prepare(`
     INSERT INTO generations
       (id, user_id, task_id, generation_type, status, prompt, model, aspect_ratio,
@@ -200,6 +295,10 @@ function importGuestDbJson(d: DatabaseSync, data: JsonDb): void {
     "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING",
   );
   for (const [k, v] of Object.entries(data.settings ?? {})) {
+    // O5 cond.4 — never (re)import plaintext legacy provider keys: a stale or
+    // re-imported guest-db.json must not re-add `kie_api_token`/`azure_api_key`
+    // to `settings` (they'd sit there after the user had them deleted).
+    if (k === "kie_api_token" || k === "azure_api_key") continue;
     if (typeof v === "string") setStmt.run(k, v);
   }
 
@@ -229,6 +328,4 @@ function importGuestDbJson(d: DatabaseSync, data: JsonDb): void {
       (r.created_at as string) ?? new Date().toISOString(),
     );
   }
-
-  d.exec("COMMIT");
 }

@@ -687,6 +687,67 @@ export function AppSidebar() {
       .catch(() => setAzureKeySet(null));
   }, [setKieKeySet, setAzureKeySet]);
 
+  // Phase 3 (C7d / O5-B1) — one-time POPULATE-ONLY migration of legacy localStorage
+  // provider config into /api/settings/providers. The three keys are NEVER deleted
+  // here: the client still reads them as its live source of truth (lib/providers.ts,
+  // GenerateNode, gallery, SettingsModal) and nothing consumes GET yet — the delete
+  // plus the design's "migrated" marker (aiui-provider-config-migrated) land together
+  // with the Phase 4+5 rewire. This distinct "uploaded" marker only stops the POST
+  // repeating. The marker is written ONLY when every key that exists was parsed and
+  // included: a failed parse keeps the key AND skips the marker, so the POST retries
+  // next load (no stranding).
+  React.useEffect(() => {
+    const UPLOADED_KEY = "aiui-providers-uploaded-v1";
+    try {
+      if (localStorage.getItem(UPLOADED_KEY)) return;
+
+      const baseUrl = localStorage.getItem("aiui-azure-base-url");
+      const endpointsRaw = localStorage.getItem("aiui-azure-endpoints");
+      const modelProvidersRaw = localStorage.getItem("aiui-model-providers");
+      if (!baseUrl && !endpointsRaw && !modelProvidersRaw) {
+        localStorage.setItem(UPLOADED_KEY, "v1"); // nothing to migrate
+        return;
+      }
+
+      const body: Record<string, unknown> = {};
+      // True only while every key that exists was successfully parsed into `body`.
+      // One parse failure ⇒ that key wasn't uploaded ⇒ withhold the marker.
+      let allUploaded = true;
+
+      if (baseUrl || endpointsRaw) {
+        body.providerId = "azure";
+        if (baseUrl) body.baseUrl = baseUrl;
+        if (endpointsRaw) {
+          try {
+            const deps = JSON.parse(endpointsRaw) as unknown;
+            if (deps && typeof deps === "object" && !Array.isArray(deps)) body.deployments = deps;
+            else allUploaded = false; // wrong shape — not uploaded
+          } catch { allUploaded = false; /* keep key + skip marker → retry */ }
+        }
+      }
+      if (modelProvidersRaw) {
+        try {
+          const prefs = JSON.parse(modelProvidersRaw) as unknown;
+          if (prefs && typeof prefs === "object" && !Array.isArray(prefs)) body.modelPrefs = prefs;
+          else allUploaded = false; // wrong shape — not uploaded
+        } catch { allUploaded = false; /* keep key + skip marker → retry */ }
+      }
+
+      fetch("/api/settings/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error(`migration POST failed: ${res.status}`);
+          // 2xx AND every present key uploaded → server holds a full copy, so mark
+          // the POST done. Keys stay untouched (populate-only, O5-B1).
+          if (allUploaded) localStorage.setItem(UPLOADED_KEY, "v1");
+        })
+        .catch(() => { /* no marker → retried on next load */ });
+    } catch { /* private-mode storage errors — skip migration */ }
+  }, []);
+
   React.useEffect(() => {
     const fetchBalance = async () => {
       try {

@@ -1,4 +1,7 @@
 import { randomUUID, createHash } from "crypto";
+import { existsSync } from "fs";
+import { homedir } from "node:os";
+import { join } from "path";
 import { db } from "./sqlite";
 import type { ProviderMeta } from "../jobStore";
 
@@ -219,50 +222,261 @@ export function storeAssetHash(hash: string, cdnUrl: string, mimeType: string, b
 
 // ── Settings ───────────────────────────────────────────────────────────────
 
-function getSetting(key: string): string | null {
-  const r = db().prepare("SELECT value FROM settings WHERE key = ?").get(key) as
-    | { value: string }
-    | undefined;
-  return r?.value ?? null;
-}
-function setSetting(key: string, value: string): void {
-  db()
-    .prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-    .run(key, value);
-}
-function deleteSetting(key: string): void {
-  db().prepare("DELETE FROM settings WHERE key = ?").run(key);
+// ── Provider configs (Phase 3, design.md §3.1-§3.2) ────────────────────────
+
+export type ProviderKeySource = "db" | "env" | "cli" | "none";
+
+export interface ProviderConfig {
+  providerId: string;
+  apiKey: string | null;
+  baseUrl: string | null;
+  extra: Record<string, unknown>;
 }
 
+/** Stored config + resolved key/base-url + where the key came from (never the raw env list). */
+export interface ProviderRuntimeConfig extends ProviderConfig {
+  keySource: ProviderKeySource;
+}
+
+interface ProviderConfigRow {
+  provider_id: string;
+  api_key: string | null;
+  base_url: string | null;
+  extra_json: string | null;
+  updated_at: string | null;
+}
+
+function rowToProviderConfig(r: ProviderConfigRow): ProviderConfig {
+  let extra: Record<string, unknown> = {};
+  if (r.extra_json) {
+    try {
+      const parsed = JSON.parse(r.extra_json) as unknown;
+      if (parsed && typeof parsed === "object") extra = parsed as Record<string, unknown>;
+    } catch { /* malformed extra_json — treat as empty */ }
+  }
+  return {
+    providerId: r.provider_id,
+    apiKey: r.api_key ?? null,
+    baseUrl: r.base_url ?? null,
+    extra,
+  };
+}
+
+/** Raw stored row for `providerId`, or null when never configured. */
+export function getProviderConfig(providerId: string): ProviderConfig | null {
+  const r = db()
+    .prepare("SELECT * FROM provider_configs WHERE provider_id = ?")
+    .get(providerId) as unknown as ProviderConfigRow | undefined;
+  return r ? rowToProviderConfig(r) : null;
+}
+
+// The historical `.env.example` placeholder must never count as a real key.
+const PLACEHOLDER_API_KEY = "your_kie_api_key_here";
+const realKey = (v: string | null | undefined): string | null =>
+  v && v !== PLACEHOLDER_API_KEY ? v : null;
+
+/** Env fallbacks per provider — `kie` unifies KIE_API_KEY ?? KIE_API_TOKEN (§3.2). */
+function envFallbackKey(providerId: string): string | null {
+  switch (providerId) {
+    case "kie":          return realKey(process.env.KIE_API_KEY) ?? realKey(process.env.KIE_API_TOKEN);
+    case "azure":        return realKey(process.env.AZURE_API_KEY);
+    case "replicate":    return realKey(process.env.REPLICATE_API_TOKEN);
+    case "fal":          return realKey(process.env.FAL_KEY);
+    case "openai-compat":return realKey(process.env.OPENAI_API_KEY);
+    default:             return null;
+  }
+}
+
+function codexAuthPath(): string {
+  return join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "auth.json");
+}
+
+/**
+ * Resolve a provider's runtime config: stored `provider_configs` row first,
+ * then env fallbacks (rejecting the `your_kie_api_key_here` placeholder).
+ * `codex` has no per-user key — it reports `keySource: "cli"` iff the shared
+ * `~/.codex/auth.json` session exists (as in app/api/settings/codex-status).
+ */
+export function getProviderRuntimeConfig(providerId: string): ProviderRuntimeConfig {
+  const cfg = getProviderConfig(providerId) ?? {
+    providerId,
+    apiKey: null,
+    baseUrl: null,
+    extra: {},
+  };
+
+  if (providerId === "codex") {
+    return { ...cfg, keySource: existsSync(codexAuthPath()) ? "cli" : "none" };
+  }
+
+  const dbKey = realKey(cfg.apiKey);
+  const envKey = dbKey ? null : envFallbackKey(providerId);
+  const apiKey = dbKey ?? envKey;
+  const keySource: ProviderKeySource = dbKey ? "db" : envKey ? "env" : "none";
+
+  let baseUrl = cfg.baseUrl;
+  if (!baseUrl && providerId === "azure") baseUrl = process.env.AZURE_BASE_URL || null;
+
+  return { ...cfg, apiKey, baseUrl, keySource };
+}
+
+export function setProviderApiKey(providerId: string, apiKey: string): void {
+  db()
+    .prepare(`
+      INSERT INTO provider_configs (provider_id, api_key, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(provider_id) DO UPDATE SET api_key = excluded.api_key, updated_at = excluded.updated_at
+    `)
+    .run(providerId, apiKey, now());
+}
+
+/** Clears the stored DB key (env fallbacks still apply). Used by DELETE routes. */
+export function clearProviderApiKey(providerId: string): void {
+  db()
+    .prepare(`
+      INSERT INTO provider_configs (provider_id, api_key, updated_at) VALUES (?, NULL, ?)
+      ON CONFLICT(provider_id) DO UPDATE SET api_key = NULL, updated_at = excluded.updated_at
+    `)
+    .run(providerId, now());
+}
+
+export function setProviderBaseUrl(providerId: string, baseUrl: string | null): void {
+  db()
+    .prepare(`
+      INSERT INTO provider_configs (provider_id, base_url, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(provider_id) DO UPDATE SET base_url = excluded.base_url, updated_at = excluded.updated_at
+    `)
+    .run(providerId, baseUrl, now());
+}
+
+/** Merges `deployments` (modelId → deployment name) into `extra_json`. */
+export function setProviderDeployments(providerId: string, deployments: Record<string, string>): void {
+  const cfg = getProviderConfig(providerId);
+  const extra = { ...(cfg?.extra ?? {}) };
+  extra.deployments = { ...((extra.deployments as Record<string, string> | undefined) ?? {}), ...deployments };
+  db()
+    .prepare(`
+      INSERT INTO provider_configs (provider_id, extra_json, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(provider_id) DO UPDATE SET extra_json = excluded.extra_json, updated_at = excluded.updated_at
+    `)
+    .run(providerId, JSON.stringify(extra), now());
+}
+
+// ── Model bindings (C6: single model_id×provider_id table) ─────────────────
+
+interface ModelBindingRow {
+  model_id: string;
+  provider_id: string;
+  binding_json: string | null;
+  is_active: number;
+  is_custom: number;
+  updated_at: string | null;
+}
+
+export interface CustomModelBinding {
+  modelId: string;
+  providerId: string;
+  binding: Record<string, unknown>;
+}
+
+/** Active provider per model (`is_active = 1`); absence means the C1 "kie" default. */
+export function getModelPrefs(): Record<string, string> {
+  const rows = db()
+    .prepare("SELECT model_id, provider_id FROM model_bindings WHERE is_active = 1")
+    .all() as Array<{ model_id: string; provider_id: string }>;
+  return Object.fromEntries(rows.map((r) => [r.model_id, r.provider_id]));
+}
+
+export function getCustomModelBindings(): CustomModelBinding[] {
+  const rows = db()
+    .prepare("SELECT * FROM model_bindings WHERE is_custom = 1")
+    .all() as unknown as ModelBindingRow[];
+  const out: CustomModelBinding[] = [];
+  for (const r of rows) {
+    let binding: Record<string, unknown> = {};
+    if (r.binding_json) {
+      try {
+        const parsed = JSON.parse(r.binding_json) as unknown;
+        if (parsed && typeof parsed === "object") binding = parsed as Record<string, unknown>;
+      } catch { /* malformed — keep empty binding */ }
+    }
+    out.push({ modelId: r.model_id, providerId: r.provider_id, binding });
+  }
+  return out;
+}
+
+/** Per-model union of providers with a stored row (custom + prefs). */
+export function getModelBindingsByModel(): Record<string, string[]> {
+  const rows = db()
+    .prepare("SELECT model_id, provider_id FROM model_bindings")
+    .all() as Array<{ model_id: string; provider_id: string }>;
+  const out: Record<string, string[]> = {};
+  for (const r of rows) (out[r.model_id] ??= []).push(r.provider_id);
+  return out;
+}
+
+/** Transactionally clears sibling active flags, then marks (modelId, providerId) active. */
+export function setModelActiveProvider(modelId: string, providerId: string): void {
+  const d = db();
+  const ts = now();
+  d.exec("BEGIN");
+  try {
+    d.prepare("UPDATE model_bindings SET is_active = 0, updated_at = ? WHERE model_id = ?").run(ts, modelId);
+    d.prepare(`
+      INSERT INTO model_bindings (model_id, provider_id, binding_json, is_active, is_custom, updated_at)
+      VALUES (?, ?, NULL, 1, 0, ?)
+      ON CONFLICT(model_id, provider_id) DO UPDATE SET is_active = 1, updated_at = excluded.updated_at
+    `).run(modelId, providerId, ts);
+    d.exec("COMMIT");
+  } catch (e) {
+    d.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+/** Upserts a user-defined binding (custom endpoint) for an existing model. */
+export function upsertCustomModelBinding(modelId: string, providerId: string, binding: Record<string, unknown>): void {
+  db()
+    .prepare(`
+      INSERT INTO model_bindings (model_id, provider_id, binding_json, is_active, is_custom, updated_at)
+      VALUES (?, ?, ?, 0, 1, ?)
+      ON CONFLICT(model_id, provider_id)
+        DO UPDATE SET binding_json = excluded.binding_json, is_custom = 1, updated_at = excluded.updated_at
+    `)
+    .run(modelId, providerId, JSON.stringify(binding), now());
+}
+
+/** Removes all model_bindings rows for a provider (DELETE /api/settings/providers). */
+export function deleteProviderModelBindings(providerId: string): void {
+  db().prepare("DELETE FROM model_bindings WHERE provider_id = ?").run(providerId);
+}
+
+// ── Legacy key wrappers (kept for /api/assistant + lib/getKieToken.ts) ──────
+// Phase 3: these now delegate to `provider_configs` so the legacy `settings`
+// rows are never re-created after the one-shot C7a migration (DELETE stays
+// deleted across restarts).
+
 export function getKieApiToken(): string | null {
-  const dbToken = getSetting("kie_api_token");
-  if (dbToken) return dbToken;
-  const envToken = process.env.KIE_API_KEY ?? "";
-  if (!envToken || envToken === "your_kie_api_key_here") return null;
-  return envToken;
+  return getProviderRuntimeConfig("kie").apiKey;
 }
 
 export function setKieApiToken(token: string): void {
-  setSetting("kie_api_token", token);
+  setProviderApiKey("kie", token);
 }
 
 export function deleteKieApiToken(): void {
-  deleteSetting("kie_api_token");
+  clearProviderApiKey("kie");
 }
 
 export function getAzureApiKey(): string | null {
-  const dbKey = getSetting("azure_api_key");
-  if (dbKey) return dbKey;
-  const envKey = process.env.AZURE_API_KEY ?? "";
-  return envKey || null;
+  return getProviderRuntimeConfig("azure").apiKey;
 }
 
 export function setAzureApiKey(key: string): void {
-  setSetting("azure_api_key", key);
+  setProviderApiKey("azure", key);
 }
 
 export function deleteAzureApiKey(): void {
-  deleteSetting("azure_api_key");
+  clearProviderApiKey("azure");
 }
 
 // ── Folders ────────────────────────────────────────────────────────────────

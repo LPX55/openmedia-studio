@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+// Phase 3 (C7a): thin wrapper over `provider_configs` — the db helpers below
+// read/write the unified provider store, never the legacy `settings` rows.
 import {
   getKieApiToken,
   setKieApiToken,

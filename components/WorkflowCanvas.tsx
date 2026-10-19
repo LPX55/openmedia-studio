@@ -21,7 +21,6 @@ import { useWorkflowStore, NodeData } from "@/lib/store";
 import { requestWorkflowSync } from "@/lib/workflowSyncBus";
 import { VIDEO_MODELS } from "@/lib/modelConfig";
 import CuttableEdge from "@/components/edges/CuttableEdge";
-import { topoSort, resolveInputs } from "@/lib/executor";
 import { NODE_SIZE, FALLBACK_SIZE, getLastNodeSettings, getDefaultNodeSize } from "@/lib/nodeTypes";
 import { edgeStyle } from "@/lib/edgeStyles";
 import { sha256Hex } from "@/lib/assetHash";
@@ -176,7 +175,7 @@ export default function WorkflowCanvas() {
     nodes, edges,
     onNodesChange: _onNodesChange, onEdgesChange, onConnect,
     addNode, insertEdge,
-    updateNodeData, isRunning, setIsRunning, debugMode, toggleDebug,
+    updateNodeData, isRunning, toggleDebug,
     setConnectingHandleType,
     saveViewport: _saveViewport,
     pushUndoSnapshot, undo, redo,
@@ -981,10 +980,6 @@ export default function WorkflowCanvas() {
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   const snapTargetRef = useRef<{ id: string; x: number; y: number } | null>(null);
 
-  const push = useCallback((text: string, ok = true) => {
-    setLog((l) => [...l.slice(-60), { text, ok }]);
-  }, []);
-
   // prompt handle: only promptNode; 1 connection max. image handle: up to 14 (nano-banana-2 limit).
   const isValidConnection = useCallback(
     (connection: Connection | Edge) => {
@@ -1150,242 +1145,6 @@ export default function WorkflowCanvas() {
     },
     [],
   );
-
-  const addToast   = useWorkflowStore((s) => s.addToast);
-  const kieKeySet  = useWorkflowStore((s) => s.kieKeySet);
-
-  const runAll = useCallback(async () => {
-    const token = await getAccessToken();
-
-    setIsRunning(true);
-    setLog([]);
-    push("Running workflow…");
-    const order = topoSort(nodes, edges);
-
-    for (const nodeId of order) {
-      const node = nodes.find((n) => n.id === nodeId) as Node<NodeData> | undefined;
-      if (!node) continue;
-
-      // ── Image generator ─────────────────────────────────────────────────────
-      if (node.type === "generateNode") {
-        // Extract frames from VideoInputNodes on the image handle that lack a capturedFrameUrl.
-        // Uses trimEnd if set (end frame), otherwise trimStart ?? 0 (start / first frame).
-        const videoImageEdges = edges.filter(
-          (e) => e.target === nodeId && e.targetHandle === "image" &&
-            useWorkflowStore.getState().nodes.find((n) => n.id === e.source)?.type === "videoInputNode"
-        );
-        for (const edge of videoImageEdges) {
-          const src = useWorkflowStore.getState().nodes.find((n) => n.id === edge.source);
-          if (!src || (src.data.capturedFrameUrl as string | undefined)) continue;
-          const videoUrl = (src.data.videoUrl ?? src.data.r2Url) as string | undefined;
-          if (!videoUrl || videoUrl.startsWith("blob:")) continue;
-          const trimStart = src.data.trimStart as number | undefined;
-          const trimEnd = src.data.trimEnd as number | undefined;
-          const extractBody = trimEnd !== undefined
-            ? { videoUrl, timeSeconds: trimEnd }
-            : { videoUrl, timeSeconds: trimStart ?? 0 };
-          try {
-            const r = await fetch("/api/extract-frame", {
-              method: "POST",
-              headers: authHeaders(token),
-              body: JSON.stringify(extractBody),
-            });
-            const j = await r.json();
-            if (j.cdnUrl) updateNodeData(src.id, { capturedFrameUrl: j.cdnUrl });
-          } catch { /* proceed without */ }
-        }
-
-        const upstream = resolveInputs(nodeId, useWorkflowStore.getState().nodes as Node<NodeData>[], edges);
-        const prompt = upstream.prompt;
-        const imageUrls = upstream.imageUrls;
-        const aspectRatio = node.data.aspectRatio ?? "1:1";
-        const quality = node.data.quality ?? "1k";
-        const payload = { prompt, imageUrls, model: node.data.model, aspectRatio, quality };
-
-        if (!prompt?.trim()) {
-          const promptNodeId = edges.find(
-            (e) => e.target === nodeId && e.targetHandle === "prompt"
-          )?.source;
-          if (promptNodeId) updateNodeData(promptNodeId, { hasError: true });
-          push(`[${node.id}] skipped — prompt is empty`, false);
-          continue;
-        }
-
-        if (debugMode) {
-          console.log(`[DEBUG] node=${node.id}`, payload);
-          push(`[DEBUG] ${node.id} — logged to console`);
-          continue;
-        }
-
-        push(`[${node.id}] ${aspectRatio} · ${imageUrls.length} image(s)…`);
-        updateNodeData(nodeId, { status: "running", imageUrl: undefined });
-
-        try {
-          // Submit job
-          const res = await fetch("/api/generate", {
-            method: "POST",
-            headers: authHeaders(token),
-            body: JSON.stringify(payload),
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error);
-
-          const { taskId, referenceImageUrls } = data as {
-            taskId: string;
-            referenceImageUrls?: string[];
-          };
-
-          // If reference images were uploaded to R2, update those nodes immediately
-          if (referenceImageUrls?.length) {
-            const imageEdges = edges.filter(
-              (e) => e.target === nodeId && e.targetHandle === "image"
-            );
-            referenceImageUrls.forEach((cdnUrl, i) => {
-              const srcId = imageEdges[i]?.source;
-              if (srcId) updateNodeData(srcId, { r2Url: cdnUrl });
-            });
-          }
-
-          // Poll /api/job-status until done (image generate is async/callback-based)
-          push(`[${node.id}] waiting for result…`);
-          let imageUrl: string | undefined;
-          for (let attempt = 0; attempt < 120; attempt++) {
-            await new Promise((r) => setTimeout(r, 3000));
-            const poll = await fetch(`/api/job-status?taskId=${taskId}`);
-            const result = await poll.json();
-            if (result.status === "done") { imageUrl = result.imageUrl; break; }
-            if (result.status === "error") throw new Error(result.error ?? "Generation failed");
-            if (attempt > 0 && attempt % 5 === 0) push(`[${node.id}] still waiting…`);
-          }
-
-          if (!imageUrl) throw new Error("Timed out waiting for generation result");
-          updateNodeData(nodeId, { status: "done", imageUrl });
-          push(`[${node.id}] done`);
-        } catch (e: unknown) {
-          const msg = e instanceof Error ? e.message : String(e);
-          updateNodeData(nodeId, { status: "error", errorMsg: msg });
-          push(`[${node.id}] error: ${msg}`, false);
-        }
-      }
-
-      // ── Assistant (text-to-text LLM) ────────────────────────────────────────
-      if (node.type === "assistantNode") {
-        const upstream = resolveInputs(nodeId, nodes as Node<NodeData>[], edges);
-        const prompt = upstream.prompt ?? (node.data.localPrompt as string | undefined) ?? "";
-
-        if (!prompt.trim()) {
-          push(`[${node.id}] skipped — prompt is empty`, false);
-          continue;
-        }
-
-        if (debugMode) {
-          console.log(`[DEBUG] assistantNode=${node.id}`, { prompt, model: node.data.model });
-          push(`[DEBUG] ${node.id} — logged to console`);
-          continue;
-        }
-
-        push(`[${node.id}] generating text…`);
-        updateNodeData(nodeId, { status: "running", outputText: "", errorMsg: undefined });
-
-        try {
-          const res = await fetch("/api/assistant", {
-            method: "POST",
-            headers: authHeaders(token),
-            body: JSON.stringify({
-              prompt,
-              model: node.data.model ?? "claude-sonnet-4-6",
-              systemPrompt: "You are an expert prompt engineer. Rewrite the user's prompt to be clearer, more specific, and more effective for an AI model. Output only the improved prompt — no explanation, no preamble, no quotes, no commentary of any kind.",
-            }),
-          });
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({ error: "Generation failed" }));
-            throw new Error(err.error ?? "Generation failed");
-          }
-
-          const reader = res.body!.getReader();
-          const decoder = new TextDecoder();
-          let accumulated = "";
-          outer: while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            for (const line of decoder.decode(value, { stream: true }).split("\n")) {
-              if (!line.startsWith("data: ")) continue;
-              const payload = line.slice(6).trim();
-              if (payload === "[DONE]") break outer;
-              try {
-                const parsed = JSON.parse(payload);
-                if (parsed.type === "content_block_delta" && parsed.delta?.type === "text_delta") {
-                  const delta = parsed.delta.text ?? "";
-                  if (delta) { accumulated += delta; updateNodeData(nodeId, { outputText: accumulated }); }
-                }
-              } catch { /* skip */ }
-            }
-          }
-          updateNodeData(nodeId, { status: "done", outputText: accumulated });
-          push(`[${node.id}] done`);
-        } catch (e: unknown) {
-          const msg = e instanceof Error ? e.message : String(e);
-          updateNodeData(nodeId, { status: "error", errorMsg: msg });
-          push(`[${node.id}] error: ${msg}`, false);
-        }
-      }
-
-      // ── Video generator (Kling 3.0) ─────────────────────────────────────────
-      if (node.type === "videoGeneratorNode") {
-        const upstream = resolveInputs(nodeId, useWorkflowStore.getState().nodes as Node<NodeData>[], edges);
-        const prompt = upstream.prompt ?? "";
-        const duration = node.data.duration ?? 5;
-        const aspectRatio = node.data.aspectRatio ?? "16:9";
-        const klingMode = node.data.klingMode ?? "pro";
-        const sound = node.data.sound ?? false;
-        const payload = {
-          prompt,
-          startFrameUrl: upstream.startFrameUrl,
-          endFrameUrl: upstream.endFrameUrl,
-          resources: upstream.resources,
-          sound, duration, aspectRatio,
-          mode: klingMode,
-        };
-
-        if (!prompt.trim()) {
-          const promptNodeId = edges.find(
-            (e) => e.target === nodeId && e.targetHandle === "prompt"
-          )?.source;
-          if (promptNodeId) updateNodeData(promptNodeId, { hasError: true });
-          push(`[${node.id}] skipped — prompt is empty`, false);
-          continue;
-        }
-
-        if (debugMode) {
-          console.log(`[DEBUG] videoNode=${node.id}`, payload);
-          push(`[DEBUG] ${node.id} — logged to console`);
-          continue;
-        }
-
-        push(`[${node.id}] Kling 3.0 · ${klingMode} · ${duration}s…`);
-        updateNodeData(nodeId, { status: "running", videoUrl: undefined });
-
-        try {
-          const res = await fetch("/api/generate-video", {
-            method: "POST",
-            headers: authHeaders(token),
-            body: JSON.stringify(payload),
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error);
-          updateNodeData(nodeId, { status: "done", videoUrl: data.videoUrl });
-          push(`[${node.id}] done`);
-        } catch (e: unknown) {
-          const msg = e instanceof Error ? e.message : String(e);
-          updateNodeData(nodeId, { status: "error", errorMsg: msg });
-          push(`[${node.id}] error: ${msg}`, false);
-        }
-      }
-    }
-
-    push("Complete");
-    setIsRunning(false);
-  }, [nodes, edges, updateNodeData, setIsRunning, debugMode, push, kieKeySet, addToast]);
 
   // ── Place a node at the viewport center (used by the empty-state picker) ────
   const addNodeAtCenter = useCallback((type: string) => {

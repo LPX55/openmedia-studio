@@ -1,36 +1,6 @@
 import { Node, Edge } from "@xyflow/react";
 import { NodeData } from "./store";
 
-/** Topological sort — returns node ids in execution order */
-export function topoSort(nodes: Node<NodeData>[], edges: Edge[]): string[] {
-  const adj: Record<string, string[]> = {};
-  const inDegree: Record<string, number> = {};
-
-  for (const n of nodes) {
-    adj[n.id] = [];
-    inDegree[n.id] = 0;
-  }
-  for (const e of edges) {
-    adj[e.source].push(e.target);
-    inDegree[e.target] = (inDegree[e.target] || 0) + 1;
-  }
-
-  const queue = Object.entries(inDegree)
-    .filter(([, d]) => d === 0)
-    .map(([id]) => id);
-  const order: string[] = [];
-
-  while (queue.length) {
-    const id = queue.shift()!;
-    order.push(id);
-    for (const next of adj[id]) {
-      inDegree[next]--;
-      if (inDegree[next] === 0) queue.push(next);
-    }
-  }
-  return order;
-}
-
 /** Returns waves of generation node IDs in dependency order.
  *  Nodes in the same wave have no inter-dependencies and run in parallel.
  *  Each wave must complete before the next starts. */

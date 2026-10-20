@@ -22,9 +22,14 @@
  *      the Azure edits operation).
  *   6. READINESS — `checkReadiness` gates on key + base URL (db key, keyEnv
  *      fallback, missing key, missing base URL).
- *   7. SETTINGS ENDPOINT — `GET /api/settings/providers` reports the
- *      "openrouter" entry (label, key source, base URL, readiness) and the
- *      per-model provider union.
+ *   7. PARAM PRESETS — the seeded presets (ids + family, valid JSON, no
+ *      duplicates on re-open), the resolution order
+ *      (preset params ← binding.paramMap ← custom override) and the loud
+ *      failure on an unknown preset id.
+ *   8. SETTINGS ENDPOINT — `GET /api/settings/providers` reports the
+ *      "openrouter" entry (label, key source, base URL, readiness), the
+ *      per-model provider union and the preset list; `PUT` accepts a
+ *      `presetId` and rejects an unknown one.
  *
  * HOW TO RUN
  *
@@ -370,7 +375,146 @@ async function main() {
   ok("key but no base URL → not ready", noBase.ready === false);
   ok("no base URL → the reason names the base URL", /base URL/i.test(noBase.reason ?? ""), noBase.reason);
 
-  // ── 7. Settings endpoint ──────────────────────────────────────────────────
+  // ── 7. Param presets (compat-plan §c) ─────────────────────────────────────
+  section("param presets");
+  const guestDb = await import(pathToFileURL(join(ROOT, "lib/guest/db.ts")).href);
+  const registryMod = await import(pathToFileURL(join(ROOT, "lib/providers/registry.ts")).href);
+  const presetsMod = await import(pathToFileURL(join(ROOT, "lib/providers/presets.ts")).href);
+
+  const seeded = guestDb.getParamPresets();
+  eq("4 param presets are seeded", seeded.length, 4);
+  eq(
+    "the seeded preset ids",
+    seeded.map((p) => p.presetId),
+    ["image-edit", "openrouter-dialect", "pollinations-sync", "standard-image"],
+  );
+  eq("the openrouter-dialect preset family", seeded.find((p) => p.presetId === "openrouter-dialect")?.family, "openrouter");
+  eq("the standard-image preset family", seeded.find((p) => p.presetId === "standard-image")?.family, "standard");
+  ok("a seeded preset carries its params", Object.keys(seeded.find((p) => p.presetId === "standard-image")?.params ?? {}).length > 0);
+  ok("the preset ids are unique", new Set(seeded.map((p) => p.presetId)).size === seeded.length);
+
+  // A malformed seed/row must fail loudly, never silently.
+  let parseError = null;
+  try {
+    presetsMod.parseParamPresetParams("broken", "{ not json");
+  } catch (err) {
+    parseError = err;
+  }
+  ok("malformed preset JSON throws", !!parseError);
+  let unknownKeyError = null;
+  try {
+    presetsMod.parseParamPresetParams("typo", JSON.stringify({ fieldz: { prompt: "prompt" } }));
+  } catch (err) {
+    unknownKeyError = err;
+  }
+  ok("an unknown preset key throws (typo guard)", /unknown param key/.test(unknownKeyError?.message ?? ""));
+
+  // Re-opening the DB must not duplicate the seeded rows (idempotent seeding).
+  const freshSqlite = await import(pathToFileURL(join(ROOT, "lib/guest/sqlite.ts")).href + "?reopen=1");
+  const reopened = freshSqlite.db().prepare("SELECT preset_id, COUNT(*) AS c FROM param_presets GROUP BY preset_id").all();
+  eq("re-opening the DB keeps one row per preset", reopened.length, 4);
+  ok("re-opening the DB does not duplicate the seeds", reopened.every((r) => r.c === 1), JSON.stringify(reopened));
+
+  // Resolution order: preset params ← binding.paramMap ← custom override.
+  // The layers must be checked on CONFLICTING keys — a per-key merge of
+  // disjoint keys looks the same in any order.
+  const presetRow = {
+    modelId: "nano-banana-2",
+    providerId: "openrouter",
+    binding: {
+      upstreamModelId: "google/gemini-nano-banana-2.1",
+      preset: "standard-image",
+      paramMap: { fields: { custom_body_key: "seed" } },
+    },
+  };
+  const resolved = registryMod.resolveForModel("nano-banana-2", "openrouter", [presetRow]);
+  eq("the resolved binding carries the preset id", resolved.binding.presetId, "standard-image");
+  ok("the resolved binding has no preset error", !resolved.binding.presetError);
+  eq("the preset contributes its fields", resolved.binding.paramMap.fields.size, "size");
+  eq("the binding's own fields win over the preset", resolved.binding.paramMap.fields.aspect_ratio, "aspectRatio");
+  eq("the custom override wins over both", resolved.binding.paramMap.fields.custom_body_key, "seed");
+  eq(
+    "the binding's value map wins over the preset's",
+    resolved.binding.paramMap.valueMaps.resolution,
+    { "1k": "1K", "2k": "2K", "4k": "4K" },
+  );
+
+  // Conflict on the SAME key — the binding's mapping must win over the preset's
+  // (the standard-image preset maps `quality` → "quality"; the gpt-image-2
+  // OpenRouter binding maps it → "tier").
+  const gpt2Resolved = registryMod.resolveForModel("gpt-image-2", "openrouter", [
+    {
+      modelId: "gpt-image-2",
+      providerId: "openrouter",
+      binding: { upstreamModelId: "openai/gpt-image-2", preset: "standard-image" },
+    },
+  ]);
+  eq(
+    "on a conflicting key the binding's mapping wins over the preset's",
+    gpt2Resolved.binding.paramMap.fields.quality,
+    "tier",
+  );
+  eq(
+    "the preset still contributes the keys the binding does not declare",
+    gpt2Resolved.binding.paramMap.fields.size,
+    "size",
+  );
+
+  // Conflict on the SAME key — the custom override wins over BOTH.
+  const overrideResolved = registryMod.resolveForModel("nano-banana-2", "openrouter", [
+    {
+      modelId: "nano-banana-2",
+      providerId: "openrouter",
+      binding: {
+        upstreamModelId: "google/gemini-nano-banana-2.1",
+        preset: "standard-image",
+        paramMap: { fields: { size: "resolution" } },
+      },
+    },
+  ]);
+  eq(
+    "on a conflicting key the custom override wins over the preset",
+    overrideResolved.binding.paramMap.fields.size,
+    "resolution",
+  );
+
+  // The merge helper itself — later layers win, records merge per key.
+  eq(
+    "mergeParamMaps: the last layer wins on a conflict",
+    presetsMod.mergeParamMaps({ fields: { a: "prompt" } }, { fields: { a: "quality" } }),
+    { fields: { a: "quality" } },
+  );
+  eq(
+    "mergeParamMaps: records merge per key",
+    presetsMod.mergeParamMaps({ fields: { a: "prompt", b: "seed" } }, { fields: { b: "quality" } }),
+    { fields: { a: "prompt", b: "quality" } },
+  );
+
+  // A binding WITHOUT a preset behaves exactly as before (no preset layer).
+  const plain = registryMod.resolveForModel("nano-banana-2", "openrouter", []);
+  eq("no preset → the binding's own paramMap is untouched", plain.binding.paramMap, nb2.paramMap);
+  ok("no preset → no preset id on the binding", plain.binding.presetId === undefined);
+
+  // An unknown preset id must fail loudly (never a silent fallback).
+  const badPreset = registryMod.resolveForModel("nano-banana-2", "openrouter", [
+    {
+      modelId: "nano-banana-2",
+      providerId: "openrouter",
+      binding: { upstreamModelId: "google/gemini-nano-banana-2.1", preset: "does-not-exist" },
+    },
+  ]);
+  ok("an unknown preset id is reported on the binding", /Unknown param preset/.test(badPreset.binding.presetError ?? ""));
+  ok("the reported error names the preset", /does-not-exist/.test(badPreset.binding.presetError ?? ""));
+  let presetFailure = null;
+  try {
+    await quiet(() => orProvider.submit({ ...baseInput, binding: badPreset.binding }));
+  } catch (err) {
+    presetFailure = err;
+  }
+  ok("an unknown preset id fails the submit (settled job error)", !!presetFailure);
+  ok("the failure message is the clear one", /does-not-exist/.test(presetFailure?.message ?? ""));
+
+  // ── 8. Settings endpoint ──────────────────────────────────────────────────
   section("GET /api/settings/providers");
   // The key comes from the env fallback (the compat family's per-backend
   // `keyEnv`) — the DB row path is the same code path with `keySource: "db"`.
@@ -391,6 +535,27 @@ async function main() {
   eq("openrouter ready (key present)", orEntry?.ready, true);
   ok("bindingsByModel unions openrouter for nano-banana-2", (payload.bindingsByModel?.["nano-banana-2"] ?? []).includes("openrouter"));
   ok("bindingsByModel unions openrouter for gpt-image-2", (payload.bindingsByModel?.["gpt-image-2"] ?? []).includes("openrouter"));
+
+  // The preset list — the picker's data source (ids + family, no secrets).
+  ok("the response carries the preset list", Array.isArray(payload.presets));
+  eq("the response lists 4 presets", payload.presets?.length, 4);
+  ok(
+    "the preset list carries ids + family",
+    (payload.presets ?? []).every((p) => typeof p.id === "string" && typeof p.family === "string"),
+  );
+  ok("the response carries no api keys", !JSON.stringify(payload).includes("sk-or-env-key"));
+
+  // PUT accepts the preset id; an unknown one is rejected (400).
+  const putOk = await route.PUT({
+    json: async () => ({ providerId: "openai-compat", presetId: "standard-image" }),
+  });
+  eq("PUT with a known presetId returns 200", putOk.status, 200);
+  const putBad = await route.PUT({
+    json: async () => ({ providerId: "openai-compat", presetId: "nope" }),
+  });
+  eq("PUT with an unknown presetId returns 400", putBad.status, 400);
+  const afterPut = await (await route.GET()).json();
+  eq("the provider reports its preset", afterPut.providers?.["openai-compat"]?.presetId, "standard-image");
 
   // ── Client surface (source-level: the client bundle pulls React/zustand) ──
   section("client surface (source-level)");

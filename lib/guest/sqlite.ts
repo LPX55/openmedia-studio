@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { existsSync, readFileSync, statSync, mkdirSync } from "fs";
 import { join } from "path";
 import { DATA_DIR } from "./paths";
+import { PARAM_PRESET_SEEDS, parseParamPresetParams } from "../providers/presets";
 
 /**
  * Guest-mode store, backed by SQLite (`node:sqlite`, built into Node 22 — no
@@ -102,6 +103,17 @@ function createSchema(d: DatabaseSync): void {
       updated_at TEXT,
       PRIMARY KEY (model_id, provider_id)
     );
+
+    -- Param presets (compat-plan §c): the BASE layer of a compat binding's
+    -- effective params (preset ← binding.paramMap ← custom overrides). The
+    -- rows are code-seeded (see seedParamPresets) and carry PARAMS ONLY —
+    -- never model bindings.
+    CREATE TABLE IF NOT EXISTS param_presets (
+      preset_id TEXT PRIMARY KEY,
+      family TEXT,
+      params_json TEXT NOT NULL,
+      updated_at TEXT
+    );
   `);
 
   // Provider-refactor Phase 2 migration (design.md §3.1) — idempotent: fresh
@@ -113,6 +125,38 @@ function createSchema(d: DatabaseSync): void {
   );
   if (!genCols.has("provider_id"))   d.exec("ALTER TABLE generations ADD COLUMN provider_id TEXT;");
   if (!genCols.has("provider_meta")) d.exec("ALTER TABLE generations ADD COLUMN provider_meta TEXT;");
+
+  seedParamPresets(d);
+}
+
+/**
+ * Seed the code-defined param presets (compat-plan §c).
+ *
+ * Idempotent: `ON CONFLICT(preset_id) DO NOTHING` — re-opening the DB never
+ * duplicates a row and never overwrites a (future) user-edited preset.
+ *
+ * FAIL LOUDLY: every seed's params JSON is parsed + validated BEFORE it is
+ * written, so a typo in a seed aborts the boot with a clear message instead of
+ * storing a broken dialect.
+ */
+function seedParamPresets(d: DatabaseSync): void {
+  const ts = new Date().toISOString();
+  const stmt = d.prepare(
+    "INSERT INTO param_presets (preset_id, family, params_json, updated_at) VALUES (?, ?, ?, ?) " +
+      "ON CONFLICT(preset_id) DO NOTHING",
+  );
+  d.exec("BEGIN");
+  try {
+    for (const seed of PARAM_PRESET_SEEDS) {
+      // Throws on malformed JSON / unknown keys — a broken seed must not boot.
+      parseParamPresetParams(seed.presetId, seed.paramsJson);
+      stmt.run(seed.presetId, seed.family, seed.paramsJson, ts);
+    }
+    d.exec("COMMIT");
+  } catch (e) {
+    d.exec("ROLLBACK");
+    throw e;
+  }
 }
 
 // ── one-time JSON import ────────────────────────────────────────────────────

@@ -209,6 +209,12 @@ export interface GenerationProvider {
    */
   readonly aliases?: readonly ProviderId[];
   /**
+   * True for the `openai-compat` family — the only family whose request
+   * dialect is described by a PARAM PRESET (compat-plan §c). Every other
+   * family shapes its payload in code, so the preset layer is inert for them.
+   */
+  readonly usesParamPresets?: boolean;
+  /**
    * Provider-level DEFAULT media staging — always overridable per binding and
    * per operation via `resolveMediaStagingStrategy()` (finding 1i).
    */

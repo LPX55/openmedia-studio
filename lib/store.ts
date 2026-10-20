@@ -158,9 +158,22 @@ export interface ProviderStatusEntry {
   deployments: Record<string, string>;
   baseUrl?:  string | null;
   keySource?: string;
+  /** The provider-level param preset id (compat-plan §c) — "" when unset. */
+  presetId?: string;
 }
 
 export type ProviderStatusMap = Record<string, ProviderStatusEntry>;
+
+/**
+ * One stored param preset (GET /api/settings/providers → `presets`).
+ * The Settings picker lists the ids and previews the params JSON — v1 has no
+ * preset editor (compat-plan §d).
+ */
+export interface ProviderPresetInfo {
+  id: string;
+  family: string;
+  params: Record<string, unknown>;
+}
 
 interface WorkflowStore {
   // ── Toasts
@@ -182,6 +195,8 @@ interface WorkflowStore {
   modelProviders:    Record<string, string>;   // modelId → active providerId (modelPrefs)
   bindingsByModel:   Record<string, string[]>; // C8 union: static bindings ∪ rows
   providersHydrated: boolean;
+  /** The stored param presets (compat-plan §c) — the Settings picker's data. */
+  presets:           ProviderPresetInfo[];
   setProviderBootstrap: (payload: {
     providers?: Record<string, {
       hasKey?: boolean;
@@ -189,9 +204,11 @@ interface WorkflowStore {
       deployments?: Record<string, string>;
       baseUrl?: string | null;
       keySource?: string;
+      presetId?: string;
     }>;
     modelPrefs?: Record<string, string>;
     bindingsByModel?: Record<string, string[]>;
+    presets?: ProviderPresetInfo[];
   }) => void;
 
   // ── Spaces
@@ -739,6 +756,7 @@ export const useWorkflowStore = create<WorkflowStore>()(
         modelProviders:    {},
         bindingsByModel:   {},
         providersHydrated: false,
+        presets:           [],
         setProviderBootstrap: (payload) =>
           set(() => {
             const providerStatus: ProviderStatusMap = {};
@@ -749,6 +767,7 @@ export const useWorkflowStore = create<WorkflowStore>()(
                 deployments: p.deployments ?? {},
                 baseUrl:     p.baseUrl ?? null,
                 keySource:   p.keySource,
+                presetId:    p.presetId ?? "",
               };
             }
             return {
@@ -756,6 +775,7 @@ export const useWorkflowStore = create<WorkflowStore>()(
               modelProviders:    payload.modelPrefs    ?? {},
               bindingsByModel:   payload.bindingsByModel ?? {},
               providersHydrated: true,
+              presets:           payload.presets       ?? [],
               // Chat compatibility (§3.4): the legacy key flags are DERIVED
               // from the same bootstrap instead of the kie-key/azure-key routes.
               kieKeySet:   payload.providers?.kie   ? !!payload.providers.kie.hasKey   : null,

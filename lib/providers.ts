@@ -152,6 +152,7 @@ export async function refreshProviderBootstrap(): Promise<void> {
       providers: d.providers,
       modelPrefs: d.modelPrefs,
       bindingsByModel: d.bindingsByModel,
+      presets: d.presets,
     });
   } catch {
     /* offline — readiness stays in the pass-through pre-hydration state */

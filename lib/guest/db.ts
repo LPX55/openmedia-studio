@@ -3,6 +3,7 @@ import { existsSync } from "fs";
 import { homedir } from "node:os";
 import { join } from "path";
 import { db } from "./sqlite";
+import { parseParamPresetParams } from "../providers/presets";
 import type { ProviderMeta } from "../jobStore";
 
 /**
@@ -364,6 +365,71 @@ export function setProviderDeployments(providerId: string, deployments: Record<s
       ON CONFLICT(provider_id) DO UPDATE SET extra_json = excluded.extra_json, updated_at = excluded.updated_at
     `)
     .run(providerId, JSON.stringify(extra), now());
+}
+
+/**
+ * Stores (or clears) the provider-level PARAM PRESET id (compat-plan §c) in
+ * `extra_json.presetId`.
+ *
+ * The provider-level preset is the DEFAULT for the provider's bindings; a
+ * custom binding may override it with its own `"preset"` key.
+ */
+export function setProviderPresetId(providerId: string, presetId: string | null): void {
+  const cfg = getProviderConfig(providerId);
+  const extra = { ...(cfg?.extra ?? {}) };
+  if (presetId) extra.presetId = presetId;
+  else delete extra.presetId;
+  db()
+    .prepare(`
+      INSERT INTO provider_configs (provider_id, extra_json, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(provider_id) DO UPDATE SET extra_json = excluded.extra_json, updated_at = excluded.updated_at
+    `)
+    .run(providerId, JSON.stringify(extra), now());
+}
+
+// ── Param presets (compat-plan §c) ───────────────────────────────────────────
+
+/** One stored param preset (the base layer of a compat binding's params). */
+export interface ParamPreset {
+  presetId: string;
+  family: string;
+  /** The preset's params (parsed + validated). */
+  params: Record<string, unknown>;
+  updatedAt: string | null;
+}
+
+interface ParamPresetRow {
+  preset_id: string;
+  family: string | null;
+  params_json: string;
+  updated_at: string | null;
+}
+
+function rowToParamPreset(r: ParamPresetRow): ParamPreset {
+  return {
+    presetId: r.preset_id,
+    family: r.family ?? "standard",
+    // A malformed stored row throws with a clear message (never a silent
+    // empty dialect).
+    params: parseParamPresetParams(r.preset_id, r.params_json) as Record<string, unknown>,
+    updatedAt: r.updated_at,
+  };
+}
+
+/** All stored presets (id + family + params) — the picker's data source. */
+export function getParamPresets(): ParamPreset[] {
+  const rows = db()
+    .prepare("SELECT preset_id, family, params_json, updated_at FROM param_presets ORDER BY preset_id")
+    .all() as unknown as ParamPresetRow[];
+  return rows.map(rowToParamPreset);
+}
+
+/** One stored preset, or `null` when the id is unknown. */
+export function getParamPreset(presetId: string): ParamPreset | null {
+  const r = db()
+    .prepare("SELECT preset_id, family, params_json, updated_at FROM param_presets WHERE preset_id = ?")
+    .get(presetId) as unknown as ParamPresetRow | undefined;
+  return r ? rowToParamPreset(r) : null;
 }
 
 // ── Model bindings (C6: single model_id×provider_id table) ─────────────────

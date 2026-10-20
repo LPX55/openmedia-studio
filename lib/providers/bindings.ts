@@ -139,6 +139,21 @@ export interface ModelProviderBinding {
   mediaStaging?: MediaStagingStrategy;
   /** Per-operation staging override (finding 1i) — e.g. Azure generations vs edits. */
   mediaStagingByOperation?: Partial<Record<MediaStagingOperation, MediaStagingStrategy>>;
+  /**
+   * Param preset id (compat-plan §c) — the BASE layer of this binding's
+   * effective params (`preset ← binding.paramMap ← custom overrides`).
+   *
+   * Set by the custom binding's `"preset"` key (per binding) or by the
+   * provider-level default (`provider_configs.extra_json.presetId`); the
+   * binding-level value wins. Only the openai-compat family has presets.
+   */
+  presetId?: string;
+  /**
+   * Set when `presetId` does NOT resolve to a stored preset. The compat
+   * adapter fails the job with this message (settled, never a silent
+   * fallback) — compat-plan §c: "validation rejects unknown keys loudly".
+   */
+  presetError?: string;
   /** True when the binding is user-defined (`model_bindings.is_custom`). */
   isCustom?: boolean;
 }

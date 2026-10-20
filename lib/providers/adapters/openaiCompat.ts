@@ -279,6 +279,9 @@ export const openaiCompatProvider: GenerationProvider = {
    */
   aliases: ["openrouter"],
   mediaStaging: "data-url",
+  // The only family whose dialect is described by a PARAM PRESET (compat-plan
+  // §c) — the registry resolves the preset layer into the binding's paramMap.
+  usesParamPresets: true,
   capabilities: {
     syncSubmission: true,
     polling: false,
@@ -312,6 +315,13 @@ export const openaiCompatProvider: GenerationProvider = {
   async submit(input: GenerateInput): Promise<SubmitOutcome> {
     const cfg = input.credentials;
     const binding = input.binding;
+
+    // An unknown param preset must fail LOUDLY (compat-plan §c) — never a
+    // silent fallback to the binding's own params. The throw happens inside
+    // the managed submit, so the job settles with this message.
+    if (binding.presetError) {
+      throw new Error(binding.presetError);
+    }
 
     const apiKey = resolveApiKey(cfg, binding);
     if (!apiKey) {

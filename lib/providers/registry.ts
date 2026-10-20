@@ -14,9 +14,10 @@
  * SERVER-ONLY: unlike `bindings.ts`, this module imports `guest/db` for runtime
  * configs (hedge (d) applies to `bindings.ts`; nothing here is client-bundled).
  */
-import { getProviderRuntimeConfig } from "../guest/db";
+import { getProviderRuntimeConfig, getParamPreset } from "../guest/db";
 import { BUILT_IN_BINDINGS, getDefaultBinding } from "./bindings";
 import type { ModelProviderBinding } from "./bindings";
+import { mergeParamMaps } from "./presets";
 import type { GenerationProvider, ProviderId, ProviderRuntimeConfig } from "./types";
 
 const providers = new Map<ProviderId, GenerationProvider>();
@@ -65,6 +66,24 @@ export interface ResolvedModelProvider {
 }
 
 /**
+ * The param preset a binding uses (compat-plan §c).
+ *
+ * Precedence: the custom binding's OWN `"preset"` key (per binding) wins over
+ * the provider-level default (`provider_configs.extra_json.presetId`).
+ */
+function resolvePresetId(
+  override: Partial<ModelProviderBinding> | undefined,
+  config: ProviderRuntimeConfig,
+): string | null {
+  const raw = override as (Partial<ModelProviderBinding> & { preset?: unknown }) | undefined;
+  const candidates = [raw?.preset, raw?.presetId, config.extra?.presetId];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) return c.trim();
+  }
+  return null;
+}
+
+/**
  * Resolve the provider + binding + runtime config for a generation (C1
  * default-binding rule):
  *
@@ -77,6 +96,12 @@ export interface ResolvedModelProvider {
  * when present); a provider with no built-in entry (Phase-6 custom endpoints)
  * must carry `upstreamModelId` in its row. DB rows are passed in by the caller
  * — this function performs no queries itself.
+ *
+ * For the openai-compat family the binding's effective `paramMap` is the
+ * PARAM PRESET layer (compat-plan §c):
+ *     preset params ← binding.paramMap ← custom-binding overrides
+ * An unknown preset id is NOT a silent fallback — the binding carries a
+ * `presetError` the adapter fails the job with.
  *
  * Throws when: the model id is unknown (custom logical models are out of scope,
  * C6), no static binding AND no usable row exist for the pair, the merged
@@ -119,7 +144,6 @@ export function resolveForModel(
   if (!merged.upstreamModelId) {
     throw new Error(`resolveForModel: binding for (model "${modelId}", provider "${providerId}") has no upstreamModelId`);
   }
-  const binding: ModelProviderBinding = { ...merged, upstreamModelId: merged.upstreamModelId };
 
   const provider = get(providerId);
   if (!provider) {
@@ -128,5 +152,36 @@ export function resolveForModel(
     );
   }
 
-  return { provider, binding, config: getProviderRuntimeConfig(providerId) };
+  const config = getProviderRuntimeConfig(providerId);
+
+  // ── Param preset layer (compat-plan §c) ───────────────────────────────────
+  // The effective params of a compat binding are
+  //     preset params ← binding.paramMap ← custom-binding overrides
+  // Only the openai-compat family has presets (every other family shapes its
+  // payload in code) — for those, a binding WITHOUT a preset keeps exactly
+  // today's behaviour (the shallow `{...staticBase, ...override}` merge above).
+  if (provider.usesParamPresets) {
+    const presetId = resolvePresetId(override, config);
+    if (presetId) {
+      merged.presetId = presetId;
+      const preset = getParamPreset(presetId);
+      if (!preset) {
+        // Loud failure, NEVER a silent fallback: the adapter turns this into a
+        // settled job error carrying the message (compat-plan §c).
+        merged.presetError =
+          `Unknown param preset "${presetId}" for provider "${providerId}" — ` +
+          `pick one of the stored presets in Settings (API Keys → Compatible endpoints).`;
+      } else {
+        merged.paramMap = mergeParamMaps(
+          preset.params,
+          staticBase?.paramMap,
+          override?.paramMap,
+        );
+      }
+    }
+  }
+
+  const binding: ModelProviderBinding = { ...merged, upstreamModelId: merged.upstreamModelId };
+
+  return { provider, binding, config };
 }

@@ -5,6 +5,9 @@ import {
   clearProviderApiKey,
   setProviderBaseUrl,
   setProviderDeployments,
+  setProviderPresetId,
+  getParamPresets,
+  getParamPreset,
   getModelPrefs,
   getCustomModelBindings,
   getModelBindingsByModel,
@@ -23,9 +26,10 @@ import { get as getRegisteredProvider } from "@/lib/providers/bootstrap";
  *
  * GET    → non-secret readiness per provider + modelPrefs + customBindings
  *          (+ bindingsByModel, the C8 per-model provider union: static Kie
- *          default ∪ stored model_bindings rows).
- * PUT    → upsert `{ providerId, apiKey?, baseUrl?, deployments? }` and/or
- *          `{ modelPrefs?, customBindings? }` (persisted into
+ *          default ∪ stored model_bindings rows) + the param presets
+ *          (compat-plan §c: ids + family + params for the picker).
+ * PUT    → upsert `{ providerId, apiKey?, baseUrl?, deployments?, presetId? }`
+ *          and/or `{ modelPrefs?, customBindings? }` (persisted into
  *          provider_configs / model_bindings).
  * POST   → alias of PUT (used by the one-time AppSidebar localStorage
  *          migration, C7d).
@@ -60,6 +64,15 @@ interface ProviderReadiness {
   ready: boolean;
   /** Why the provider is not ready (adapter `checkReadiness` reason). */
   reason?: string;
+  /** The provider-level param preset id (compat-plan §c) — "" when unset. */
+  presetId: string;
+}
+
+/** A stored param preset (id + family + params) — the picker's data source. */
+interface PresetInfo {
+  id: string;
+  family: string;
+  params: Record<string, unknown>;
 }
 
 export async function GET() {
@@ -68,6 +81,10 @@ export async function GET() {
   // disagree with what the generation path will do (compat-plan §b).
   const orProvider = getRegisteredProvider("openrouter");
   const orBinding = getOpenRouterBinding();
+  // The family adapter itself — a user-pointed backend (LiteLLM / new-api /
+  // own gateway) is configured under the "openai-compat" id and needs a key
+  // AND a base URL.
+  const compatProvider = getRegisteredProvider("openai-compat");
 
   const providers: Record<string, ProviderReadiness> = {};
   for (const p of PROVIDER_CATALOG) {
@@ -90,6 +107,13 @@ export async function GET() {
       const check = orProvider?.checkReadiness(cfg, orBinding);
       ready = check?.ready ?? hasKey;
       reason = check?.reason;
+    } else if (p.id === "openai-compat") {
+      // A USER-pointed backend: the base URL comes from the stored config, and
+      // the adapter decides readiness (key + base URL) so the report can never
+      // disagree with the generation path.
+      const check = compatProvider?.checkReadiness(cfg, undefined);
+      ready = check?.ready ?? hasKey;
+      reason = check?.reason;
     } else {
       ready = hasKey;
     }
@@ -102,6 +126,7 @@ export async function GET() {
       baseUrl,
       deployments,
       ready,
+      presetId: typeof cfg.extra.presetId === "string" ? cfg.extra.presetId : "",
       ...(reason ? { reason } : {}),
     };
   }
@@ -127,6 +152,11 @@ export async function GET() {
     modelPrefs: getModelPrefs(),
     customBindings: getCustomModelBindings(),
     bindingsByModel,
+    // Param presets (compat-plan §c): ids + family (+ the params JSON for the
+    // view-only preview in the Settings picker). No secrets here.
+    presets: getParamPresets().map(
+      (p): PresetInfo => ({ id: p.presetId, family: p.family, params: p.params }),
+    ),
   });
 }
 
@@ -141,16 +171,23 @@ async function upsertFromBody(req: NextRequest) {
     return NextResponse.json({ error: "body must be an object" }, { status: 400 });
   }
 
-  const { providerId, apiKey, baseUrl, deployments, modelPrefs, customBindings } = body as {
+  const { providerId, apiKey, baseUrl, deployments, presetId, modelPrefs, customBindings } = body as {
     providerId?: unknown;
     apiKey?: unknown;
     baseUrl?: unknown;
     deployments?: unknown;
+    presetId?: unknown;
     modelPrefs?: unknown;
     customBindings?: unknown;
   };
 
-  if (providerId != null || apiKey != null || baseUrl != null || deployments != null) {
+  if (
+    providerId != null ||
+    apiKey != null ||
+    baseUrl != null ||
+    deployments != null ||
+    presetId != null
+  ) {
     if (typeof providerId !== "string" || !providerId.trim()) {
       return NextResponse.json({ error: "providerId is required" }, { status: 400 });
     }
@@ -166,6 +203,22 @@ async function upsertFromBody(req: NextRequest) {
         return NextResponse.json({ error: "baseUrl must be a string" }, { status: 400 });
       }
       setProviderBaseUrl(pid, baseUrl.trim() || null);
+    }
+    if (presetId != null) {
+      if (typeof presetId !== "string") {
+        return NextResponse.json({ error: "presetId must be a string" }, { status: 400 });
+      }
+      const wanted = presetId.trim();
+      if (wanted) {
+        // Fail fast on a typo'd preset id — a silent fallback would generate
+        // with the wrong dialect (compat-plan §c).
+        if (!getParamPreset(wanted)) {
+          return NextResponse.json({ error: `Unknown param preset "${wanted}"` }, { status: 400 });
+        }
+        setProviderPresetId(pid, wanted);
+      } else {
+        setProviderPresetId(pid, null);
+      }
     }
     if (deployments != null) {
       if (typeof deployments !== "object" || Array.isArray(deployments)) {

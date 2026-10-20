@@ -398,6 +398,341 @@ function ModelGroup({
   );
 }
 
+/* ─── Compatible endpoints (openai-compat family) ─────────────────────────── */
+
+/**
+ * The compat family's endpoints (compat-plan §d): base URL + key + a PARAM
+ * PRESET per backend. The preset picker is view-only (a dropdown listing the
+ * stored preset ids + a JSON preview) — the presets themselves are code-seeded
+ * rows, editing them is a later task.
+ *
+ * `baseUrlPinned` marks a backend whose base URL is fixed by its built-in
+ * binding (OpenRouter): the field stays editable for reference, but the
+ * binding's URL wins at request time.
+ */
+const COMPAT_ENDPOINTS: {
+  id: string;
+  label: string;
+  hint: string;
+  baseUrlPinned: boolean;
+}[] = [
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    hint: "OpenAI-compatible image backend (OpenRouter dialect).",
+    baseUrlPinned: true,
+  },
+  {
+    id: "openai-compat",
+    label: "Custom OpenAI-Compatible",
+    hint: "Any OpenAI-speaking endpoint (LiteLLM, new-api, your own gateway).",
+    baseUrlPinned: false,
+  },
+];
+
+function CompatEndpointCard({
+  id,
+  label,
+  hint,
+  baseUrlPinned,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  baseUrlPinned: boolean;
+}) {
+  const status = useWorkflowStore((s) => s.providerStatus[id]);
+  const presets = useWorkflowStore((s) => s.presets);
+  const [keyInput, setKeyInput]       = useState("");
+  const [savingKey, setSavingKey]     = useState(false);
+  const [error, setError]             = useState<string | null>(null);
+  // Drafts: `null` ⇒ the server value shows through (the DB is the source of
+  // truth). A draft is set while the user edits and dropped once the write
+  // landed (or failed) — no mirroring effect needed.
+  const [baseUrlDraft, setBaseUrlDraft] = useState<string | null>(null);
+  const [presetDraft, setPresetDraft]   = useState<string | null>(null);
+  const [presetBusy, setPresetBusy]     = useState(false);
+
+  const baseUrl = baseUrlDraft ?? status?.baseUrl ?? "";
+  const presetId = presetDraft ?? status?.presetId ?? "";
+
+  const put = async (body: Record<string, unknown>) => {
+    const res = await fetch("/api/settings/providers", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ providerId: id, ...body }),
+    });
+    if (!res.ok) {
+      const d = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(d.error ?? "Failed to save");
+    }
+    await refreshProviderBootstrap();
+  };
+
+  const handleSaveKey = async () => {
+    const key = keyInput.trim();
+    if (!key) return;
+    setSavingKey(true);
+    setError(null);
+    try {
+      await put({ apiKey: key });
+      setKeyInput("");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
+  const handleRemoveKey = async () => {
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/settings/providers?providerId=${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) throw new Error("Failed to remove the key");
+      await refreshProviderBootstrap();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to remove the key");
+    }
+  };
+
+  const handleSaveBaseUrl = async () => {
+    const url = baseUrl.trim();
+    if (!url || url === (status?.baseUrl ?? "")) {
+      setBaseUrlDraft(null);
+      return;
+    }
+    setError(null);
+    try {
+      await put({ baseUrl: url });
+      setBaseUrlDraft(null);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to save");
+    }
+  };
+
+  const handlePresetChange = async (value: string) => {
+    setPresetDraft(value);
+    setPresetBusy(true);
+    setError(null);
+    try {
+      await put({ presetId: value });
+    } catch (e: unknown) {
+      // Revert to the stored value — the write did not land.
+      setPresetDraft(null);
+      setError(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
+  const selected = presets.find((p) => p.id === presetId);
+  const hasKey = !!status?.hasKey;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "10px",
+        padding: "16px",
+        background: "rgba(255,255,255,0.02)",
+        border: "1px solid rgba(255,255,255,0.08)",
+        borderRadius: "12px",
+      }}
+    >
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <span
+          style={{
+            width: "28px", height: "28px", borderRadius: "7px",
+            background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <ProviderBrandIcon id={id} size={16} />
+          {id === "openrouter" ? null : (
+            <span
+              style={{
+                fontSize: "10px", fontWeight: 700, letterSpacing: "-0.02em",
+                color: "rgba(255,255,255,0.5)",
+              }}
+            >
+              OC
+            </span>
+          )}
+        </span>
+        <div>
+          <div style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.85)" }}>{label}</div>
+          <div style={{ fontSize: "10px", color: "rgba(255,255,255,0.28)", marginTop: "1px" }}>
+            {hint}
+          </div>
+        </div>
+        {hasKey && (
+          <span
+            style={{
+              marginLeft: "auto", fontSize: "10px", fontWeight: 600,
+              color: "rgba(74,222,128,0.8)", background: "rgba(74,222,128,0.08)",
+              border: "1px solid rgba(74,222,128,0.2)", borderRadius: "5px",
+              padding: "2px 7px", letterSpacing: "0.04em",
+            }}
+          >
+            SAVED
+          </span>
+        )}
+      </div>
+
+      {/* API key */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+        <label
+          htmlFor={`compat-key-${id}`}
+          style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
+        >
+          API Key
+        </label>
+        {hasKey ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <input
+              id={`compat-key-${id}`}
+              type="password"
+              value="placeholdertoken"
+              readOnly
+              style={{ ...INPUT_STYLE, flex: 1, cursor: "default", color: "rgba(255,255,255,0.3)" }}
+            />
+            <button
+              onClick={handleRemoveKey}
+              style={{
+                padding: "7px 12px", borderRadius: "7px", border: "1px solid rgba(239,68,68,0.3)",
+                background: "rgba(239,68,68,0.06)", color: "rgba(239,68,68,0.7)",
+                cursor: "pointer", fontSize: "12px", fontWeight: 500, whiteSpace: "nowrap",
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <input
+                id={`compat-key-${id}`}
+                type="password"
+                placeholder="Paste your API key"
+                value={keyInput}
+                onChange={(e) => setKeyInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void handleSaveKey(); }}
+                style={{ ...INPUT_STYLE, flex: 1 }}
+                onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"; }}
+                onBlur={(e)  => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
+              />
+              <button
+                onClick={handleSaveKey}
+                disabled={!keyInput.trim() || savingKey}
+                style={{
+                  padding: "7px 14px", borderRadius: "7px", border: "none",
+                  background: keyInput.trim() ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
+                  color: keyInput.trim() ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.25)",
+                  cursor: keyInput.trim() ? "pointer" : "default",
+                  fontSize: "12px", fontWeight: 500, whiteSpace: "nowrap",
+                }}
+              >
+                {savingKey ? "Saving…" : "Save"}
+              </button>
+            </div>
+            <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", margin: 0, lineHeight: 1.5 }}>
+              Stored on the server — it is never exposed to the browser.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Base URL */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+        <label
+          htmlFor={`compat-base-url-${id}`}
+          style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
+        >
+          Base URL
+        </label>
+        <input
+          id={`compat-base-url-${id}`}
+          type="url"
+          placeholder="https://your-gateway.example.com/v1"
+          value={baseUrl}
+          readOnly={baseUrlPinned}
+          onChange={(e) => setBaseUrlDraft(e.target.value)}
+          onBlur={(e) => {
+            (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)";
+            void handleSaveBaseUrl();
+          }}
+          onKeyDown={(e) => { if (e.key === "Enter") void handleSaveBaseUrl(); }}
+          style={{ ...INPUT_STYLE, ...(baseUrlPinned ? { color: "rgba(255,255,255,0.4)" } : {}) }}
+          onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"; }}
+        />
+        <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", margin: 0, lineHeight: 1.5 }}>
+          {baseUrlPinned
+            ? "Pinned by this backend's built-in binding — the endpoint path is appended to it."
+            : "The endpoint path (/v1/images/generations) is appended to this base."}
+        </p>
+      </div>
+
+      {/* Param preset */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+        <label
+          htmlFor={`compat-preset-${id}`}
+          style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
+        >
+          Param Preset
+        </label>
+        <select
+          id={`compat-preset-${id}`}
+          value={presetId}
+          disabled={presetBusy}
+          onChange={(e) => { void handlePresetChange(e.target.value); }}
+          style={INPUT_STYLE}
+        >
+          <option value="">No preset (binding params only)</option>
+          {presets.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.id} — {p.family}
+            </option>
+          ))}
+        </select>
+        <pre
+          style={{
+            margin: 0,
+            padding: "9px 11px",
+            background: "rgba(0,0,0,0.25)",
+            border: "1px solid rgba(255,255,255,0.06)",
+            borderRadius: "7px",
+            fontSize: "10px",
+            lineHeight: 1.5,
+            color: "rgba(255,255,255,0.45)",
+            fontFamily: "monospace",
+            maxHeight: "180px",
+            overflow: "auto",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {selected
+            ? JSON.stringify(selected.params, null, 2)
+            : "No preset selected — the binding's own params are used."}
+        </pre>
+        <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", margin: 0, lineHeight: 1.5 }}>
+          The preset supplies the base request params; the binding&apos;s own params and any custom
+          overrides still win.
+        </p>
+      </div>
+
+      {error && (
+        <p style={{ fontSize: "11px", color: "rgba(239,68,68,0.7)", margin: 0 }}>{error}</p>
+      )}
+    </div>
+  );
+}
+
 /* ─── API Keys panel ─────────────────────────────────────────────────────────── */
 
 const INPUT_STYLE: React.CSSProperties = {
@@ -791,6 +1126,29 @@ function ApiKeysPanel({
             Combined with per-model deployment names below.
           </p>
         </div>
+      </div>
+
+      {/* ──── Compatible endpoints (openai-compat family) ───────────────── */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+        <div>
+          <div style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.85)" }}>
+            Compatible endpoints
+          </div>
+          <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.28)", marginTop: "4px", lineHeight: 1.5 }}>
+            Any OpenAI-speaking backend: point it at a base URL, give it a key and pick the param
+            preset that describes its dialect. The preset supplies the base request params — the
+            binding&apos;s own params and any custom overrides still win.
+          </p>
+        </div>
+        {COMPAT_ENDPOINTS.map((ep) => (
+          <CompatEndpointCard
+            key={ep.id}
+            id={ep.id}
+            label={ep.label}
+            hint={ep.hint}
+            baseUrlPinned={ep.baseUrlPinned}
+          />
+        ))}
       </div>
 
       {/* ──── Codex CLI status ─────────────────────────────────────────── */}

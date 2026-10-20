@@ -46,6 +46,8 @@ export type VideoPayloadFamily =
  *  - "quality"      — the raw quality param
  *  - "resolution"   — the raw resolution param
  *  - "size"         — the custom pixel size ("WxH")
+ *  - "width"        — the custom pixel WIDTH (a number, not "WxH")
+ *  - "height"       — the custom pixel HEIGHT (a number, not "WxH")
  *  - "seed"         — the seed
  *  - "references"   — the staged reference images
  *  - "outputFormat" — the catalog's declared output format
@@ -57,6 +59,8 @@ export type CompatFieldSource =
   | "quality"
   | "resolution"
   | "size"
+  | "width"
+  | "height"
   | "seed"
   | "references"
   | "outputFormat";
@@ -78,6 +82,10 @@ export type CompatFieldSource =
  *  - `modelKey`    — body key carrying the upstream model id (default "model").
  *  - `maxReferences` — upstream reference-image cap (per-model, from the
  *                    binding-availability spike).
+ *  - `referenceMode` — how the staged references are shaped in the body:
+ *                    "array" (default — `["url", …]`, the OpenAI shape) or
+ *                    "first" (a single URL string — for backends whose
+ *                    reference field takes ONE url).
  */
 export type CompatParamMap = {
   fields?: Record<string, CompatFieldSource>;
@@ -85,7 +93,41 @@ export type CompatParamMap = {
   constants?: Record<string, string>;
   modelKey?: string;
   maxReferences?: number;
+  referenceMode?: "array" | "first";
 };
+
+/**
+ * The media-upload endpoint of an openai-compat binding — the counterpart of
+ * the "remote-url" staging strategy (compat-plan §b: "per-binding override").
+ *
+ * A backend that stages local reference media as a URL needs somewhere to
+ * PUT the bytes: Pollinations uploads to its MEDIA STORE
+ * (`https://media.pollinations.ai/upload` — a SIBLING host of the generation
+ * base URL `https://gen.pollinations.ai`), not to the generation endpoint.
+ *
+ * The endpoint AND its field convention are the BINDING's business — the
+ * adapter stays generic (compat-plan §a: no vendor branches in code):
+ *
+ *  - `url`      — absolute upload endpoint.
+ *  - `field`    — multipart form field / JSON key carrying the bytes
+ *                 (default "file").
+ *  - `encoding` — body encoding (default "multipart"; "raw" posts the bytes,
+ *                 "base64" posts a base64 payload under `field`).
+ *  - `headers`  — extra request headers (merged over the defaults).
+ *  - `fields`   — extra non-file multipart fields.
+ */
+export interface CompatMediaUpload {
+  /** Absolute URL of the upload endpoint. */
+  url: string;
+  /** Multipart form field / JSON key carrying the bytes (default "file"). */
+  field?: string;
+  /** Body encoding of the upload (default "multipart"). */
+  encoding?: "multipart" | "raw" | "base64";
+  /** Extra request headers (merged over the adapter's defaults). */
+  headers?: Record<string, string>;
+  /** Extra non-file multipart fields. */
+  fields?: Record<string, string>;
+}
 
 /**
  * How one provider executes one logical model (design §1.1).
@@ -139,6 +181,14 @@ export interface ModelProviderBinding {
   mediaStaging?: MediaStagingStrategy;
   /** Per-operation staging override (finding 1i) — e.g. Azure generations vs edits. */
   mediaStagingByOperation?: Partial<Record<MediaStagingOperation, MediaStagingStrategy>>;
+  /**
+   * The media-upload endpoint used by the "remote-url" staging strategy — the
+   * binding's own media store (e.g. Pollinations' `media.pollinations.ai`).
+   *
+   * Only consulted when the resolved staging strategy is "remote-url"; the
+   * upload hook is otherwise never called (a data-url backend never uploads).
+   */
+  mediaUpload?: CompatMediaUpload;
   /**
    * Param preset id (compat-plan §c) — the BASE layer of this binding's
    * effective params (`preset ← binding.paramMap ← custom overrides`).
@@ -472,10 +522,177 @@ const openRouterImageBindings: ModelProviderBinding[] = [
   },
 ];
 
+// ── Pollinations image dialect (compat-plan §b; spike: .slim/binding-spike.md) ──
+
+/** Pollinations' generation base URL (spike, 2026-10-20). */
+export const POLLINATIONS_BASE_URL = "https://gen.pollinations.ai";
+
+/** Pollinations' OpenAI-compatible SYNC image path (spike: `/v1/images/generations`). */
+export const POLLINATIONS_IMAGE_PATH = "/v1/images/generations";
+
+/** Pollinations' key env var — the compat family does NOT share one key. */
+export const POLLINATIONS_KEY_ENV = "POLLINATIONS_API_KEY";
+
+/**
+ * Pollinations' MEDIA STORE upload endpoint — a SIBLING host of the generation
+ * base URL (findings §3: `POST https://media.pollinations.ai/upload`;
+ * multipart / raw / base64, ≤400 MiB, 30-day lifecycle).
+ *
+ * This is why the Pollinations bindings stage references as "remote-url": the
+ * backend takes reference images as URLs, and a local file has to be uploaded
+ * to the media store first (a data-url in the request body is impractical).
+ */
+export const POLLINATIONS_MEDIA_UPLOAD_URL = "https://media.pollinations.ai/upload";
+
+/**
+ * The dialect fields every Pollinations image model shares.
+ *
+ * The Pollinations SYNC leg (`POST /v1/images/generations`, OpenAI-compatible)
+ * speaks the backend's NATIVE parameter names (findings §3 + starter spec
+ * paramMap table):
+ *
+ *  - `prompt` — the prompt text.
+ *  - `width` / `height` — the pixel size. The backend has NO aspect-ratio
+ *    parameter ("aspect only derivable via width/height"), so the catalog's
+ *    aspect ratio does NOT ride along; only the custom pixel size does
+ *    (`customWidth`/`customHeight` → the numeric width/height fields — the
+ *    "size" source would produce a "WxH" STRING, which this dialect does not
+ *    take).
+ *  - `seed` — the seed.
+ *  - `image` — the reference images. The value is the ARRAY of staged URLs
+ *    (the OpenAI `images/edits` shape — Pollinations exposes
+ *    `/v1/images/edits` too, spike line 59) capped at the model's upstream
+ *    reference cap. The native GET route takes a single `image=` url; the
+ *    JSON body takes the array, and the upstream model catalogue advertises
+ *    multi-reference caps (up to 16) that a single-url field could not
+ *    express. A binding that needs the scalar form sets
+ *    `referenceMode: "first"`.
+ *
+ * NOT sent (undocumented upstream — findings §3: "quality, mode, sound — none
+ * documented"): the quality/resolution tier, the aspect ratio, a negative
+ * prompt. The catalog's tier picker therefore has no effect on this lane.
+ */
+const POL_IMAGE_FIELDS = {
+  prompt: "prompt",
+  width: "width",
+  height: "height",
+  seed: "seed",
+} as const;
+
+/**
+ * One Pollinations image binding.
+ *
+ * Every Pollinations binding shares the backend (base URL + key env + media
+ * store + staging strategy); only the upstream model id and the reference cap
+ * differ per model (the binding-availability spike, 2026-10-20).
+ *
+ * `maxReferences` = the model's UPSTREAM reference cap (spike), not the
+ * catalog's: `0` ⇒ the model is text-only upstream and no reference field is
+ * declared at all (the family never sends undeclared fields).
+ */
+function pollinationsImageBinding(
+  modelId: string,
+  upstreamModelId: string,
+  maxReferences: number,
+): ModelProviderBinding {
+  const fields: Record<string, CompatFieldSource> = { ...POL_IMAGE_FIELDS };
+  if (maxReferences > 0) fields.image = "references";
+  return {
+    modelId,
+    providerId: "pollinations",
+    upstreamModelId,
+    family: "standard",
+    baseUrl: POLLINATIONS_BASE_URL,
+    pathOverride: POLLINATIONS_IMAGE_PATH,
+    keyEnv: POLLINATIONS_KEY_ENV,
+    // Reference images are URLs upstream ⇒ local media is uploaded to the
+    // media store first (the "remote-url" strategy + the binding's upload
+    // endpoint). Already-remote URLs pass through unchanged (pinned rule).
+    mediaStaging: "remote-url",
+    mediaUpload: {
+      url: POLLINATIONS_MEDIA_UPLOAD_URL,
+      field: "file",
+      encoding: "multipart",
+    },
+    paramMap: {
+      fields,
+      maxReferences,
+    },
+  };
+}
+
+/**
+ * Pollinations image bindings — the 11 SHIP upstream ids of the
+ * binding-availability spike (2026-10-20), copied VERBATIM from the spike's
+ * image table (the alias in brackets is the upstream-side model alias, kept
+ * here as documentation — the request carries the canonical id).
+ *
+ * VIDEO IS EXPLICITLY OUT: the Pollinations video lane is the "weak lane"
+ * (tighter caps, several ids capped at 5 s, mostly unknown health) — it does
+ * not ride this lane.
+ */
+const pollinationsImageBindings: ModelProviderBinding[] = [
+  // google-nano-banana → "google/gemini-2.5-flash-image" (alias
+  // "nanobanana") — the original Nano Banana. The catalog entry is text-only
+  // (maxImages 0) while the upstream model takes references; the OR lane
+  // caps this model at 3 refs and Pollinations publishes no separate cap ⇒
+  // 3 is used here as the conservative upstream cap.
+  pollinationsImageBinding("google-nano-banana", "google/gemini-2.5-flash-image", 3),
+
+  // nano-banana-2 → "google/gemini-3.1-flash-image" (alias "nanobanana2") —
+  // the successor line (the exact "nano-banana-2" id is gone upstream).
+  // Refs 14 ✓ matches the catalog. ⚠ Health watch: the spike saw this
+  // listing DOWN (0/81) — the binding stays, the health is the backend's.
+  pollinationsImageBinding("nano-banana-2", "google/gemini-3.1-flash-image", 14),
+
+  // nano-banana-pro → "google/gemini-3-pro-image" (alias
+  // "nanobanana-pro"). Refs 14 upstream vs 8 in the catalog (upstream allows
+  // more — the binding keeps the upstream cap).
+  pollinationsImageBinding("nano-banana-pro", "google/gemini-3-pro-image", 14),
+
+  // nano-banana-2-lite → "google/gemini-3.1-flash-lite-image" (aliases
+  // "nanobanana2lite" / "nanobanana-2-lite") — POLLINATIONS ONLY (not on
+  // OpenRouter). Refs 14 upstream vs 10 in the catalog.
+  pollinationsImageBinding("nano-banana-2-lite", "google/gemini-3.1-flash-lite-image", 14),
+
+  // z-image → "tongyi-mai/z-image-turbo" (alias "z-image") — POLLINATIONS
+  // ONLY (not on OpenRouter). Text-only upstream ⇒ NO reference field is
+  // declared (maxReferences 0).
+  pollinationsImageBinding("z-image", "tongyi-mai/z-image-turbo", 0),
+
+  // seedream-5-lite → "bytedance/seedream-5.0-lite". Refs 14 ✓ matches the
+  // catalog. (The upstream resolution enum is NOT sent — Pollinations has no
+  // quality/resolution parameter; see POL_IMAGE_FIELDS.)
+  pollinationsImageBinding("seedream-5-lite", "bytedance/seedream-5.0-lite", 14),
+
+  // seedream-5-pro → "bytedance/seedream-5.0-pro" (alias "seedream-5-pro").
+  // Refs 14 upstream vs 10 in the catalog. ⚠ Health watch: degraded in the
+  // spike.
+  pollinationsImageBinding("seedream-5-pro", "bytedance/seedream-5.0-pro", 14),
+
+  // grok-imagine-image → "x-ai/grok-imagine-image" (the OR ids are
+  // "x-ai/grok-imagine-image-2.0" / "-quality"). REF-CAP MISMATCH: OpenRouter
+  // allows 3 refs, Pollinations allows 5 — and only Pollinations reaches the
+  // catalog's maxImages 5 ⇒ the binding keeps the upstream cap 5.
+  pollinationsImageBinding("grok-imagine-image", "x-ai/grok-imagine-image", 5),
+
+  // gpt-image-2 → "openai/gpt-image-2". Refs 16 ✓. The upstream quality enum
+  // (auto/low/medium/high) does NOT match the catalog's 1k/2k/4k picker and
+  // Pollinations takes no quality parameter at all ⇒ the tier is not sent.
+  pollinationsImageBinding("gpt-image-2", "openai/gpt-image-2", 16),
+
+  // gpt-image-2-5-flare → "openai/gpt-image-2.5-flare". Refs 16 ✓.
+  pollinationsImageBinding("gpt-image-2-5-flare", "openai/gpt-image-2.5-flare", 16),
+
+  // gpt-image-2-5-sunburst → "openai/gpt-image-2.5-sunburst". Refs 16 ✓.
+  pollinationsImageBinding("gpt-image-2-5-sunburst", "openai/gpt-image-2.5-sunburst", 16),
+];
+
 /**
  * C1 static binding set: 11 image models + 17 video models, each with a Kie
- * binding (`upstreamModelId = apiId`), plus Azure and Codex for `gpt-image-2`
- * and OpenRouter for the 10 SHIP image models → 40 code-defined bindings.
+ * binding (`upstreamModelId = apiId`), plus Azure and Codex for `gpt-image-2`,
+ * OpenRouter for the 10 SHIP image models and Pollinations for the 11 SHIP
+ * image models → 51 code-defined bindings.
  * Immutable by convention — merge copies for overrides (the registry never
  * mutates these).
  */
@@ -485,6 +702,7 @@ export const BUILT_IN_BINDINGS: readonly ModelProviderBinding[] = [
   ...(gptImage2AzureBinding ? [gptImage2AzureBinding] : []),
   ...(gptImage2CodexBinding ? [gptImage2CodexBinding] : []),
   ...openRouterImageBindings,
+  ...pollinationsImageBindings,
 ];
 
 const DEFAULT_BINDINGS = new Map<string, ModelProviderBinding>(
@@ -513,11 +731,11 @@ export function getDefaultBinding(modelId: string): ModelProviderBinding {
 /**
  * Providers selectable for `modelId` from STATIC data: `{"kie"} ∪ {providers
  * of built-in bindings}` — never empty (C1.2), so a selector renders at ≥2 for
- * `gpt-image-2` exactly as before. With the OpenRouter image bindings this
- * yields `kie + openrouter` for the 10 SHIP image models (plus `azure`/`codex`
- * for `gpt-image-2`). Stored `model_bindings` rows are unioned in server-side
- * by `GET /api/settings/providers` (`bindingsByModel`); this module cannot see
- * them (hedge (d) — pure, no DB).
+ * `gpt-image-2` exactly as before. With the OpenRouter + Pollinations image
+ * bindings this yields `kie + openrouter` / `kie + pollinations` (plus
+ * `azure`/`codex` for `gpt-image-2`). Stored `model_bindings` rows are unioned
+ * in server-side by `GET /api/settings/providers` (`bindingsByModel`); this
+ * module cannot see them (hedge (d) — pure, no DB).
  */
 export function getAvailableProvidersForModel(modelId: string): ProviderId[] {
   const out: ProviderId[] = ["kie"];
@@ -535,4 +753,13 @@ export function getAvailableProvidersForModel(modelId: string): ProviderId[] {
  */
 export function getOpenRouterBinding(): ModelProviderBinding | undefined {
   return BUILT_IN_BINDINGS.find((b) => b.providerId === "openrouter");
+}
+
+/**
+ * A representative Pollinations binding — all 11 Pollinations image bindings
+ * share the same backend (base URL + key env + media store + dialect), so any
+ * of them describes the PROVIDER-level readiness (compat-plan §b).
+ */
+export function getPollinationsBinding(): ModelProviderBinding | undefined {
+  return BUILT_IN_BINDINGS.find((b) => b.providerId === "pollinations");
 }

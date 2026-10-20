@@ -289,6 +289,10 @@ function envFallbackKey(providerId: string): string | null {
     // family never shares one key across backends (its binding's `keyEnv`).
     // Listed here so the readiness report and the adapter agree on the key.
     case "openrouter":   return realKey(process.env.OPENROUTER_API_KEY);
+    // Pollinations rides the openai-compat family with its OWN key (its
+    // binding's `keyEnv`). Listed here so the readiness report and the
+    // adapter agree on the key.
+    case "pollinations": return realKey(process.env.POLLINATIONS_API_KEY);
     default:             return null;
   }
 }

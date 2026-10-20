@@ -21,6 +21,9 @@ export const PROVIDERS = [
   // OpenRouter rides the openai-compat family (P6 step 1) but keeps its OWN
   // provider id — it carries its own key row, base URL and model bindings.
   { id: "openrouter", label: "OpenRouter" },
+  // Pollinations is another backend of the same family (its OpenAI-compatible
+  // sync image leg) — own key row, base URL and model bindings.
+  { id: "pollinations", label: "Pollinations" },
 ] as const;
 
 /**
@@ -118,6 +121,8 @@ function readinessReason(providerId: ProviderId): string {
       return "Codex CLI is not configured — run `codex login` on this machine.";
     case "openrouter":
       return "OpenRouter is not configured — add its API key in Settings (or set OPENROUTER_API_KEY).";
+    case "pollinations":
+      return "Pollinations is not configured — add its API key in Settings (or set POLLINATIONS_API_KEY).";
     default:
       return "No Kie.ai API key configured. Add one in Settings.";
   }

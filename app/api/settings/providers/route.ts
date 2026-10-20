@@ -16,7 +16,13 @@ import {
   deleteProviderModelBindings,
 } from "@/lib/guest/db";
 import { IMAGE_MODELS, VIDEO_MODELS } from "@/lib/modelConfig";
-import { getAvailableProvidersForModel, getOpenRouterBinding, OPENROUTER_BASE_URL } from "@/lib/providers/bindings";
+import {
+  getAvailableProvidersForModel,
+  getOpenRouterBinding,
+  getPollinationsBinding,
+  OPENROUTER_BASE_URL,
+  POLLINATIONS_BASE_URL,
+} from "@/lib/providers/bindings";
 // The registry (side-effect registration + the adapter's own `checkReadiness`)
 // — controllers import the BOOTSTRAP module, never an adapter directly.
 import { get as getRegisteredProvider } from "@/lib/providers/bootstrap";
@@ -50,6 +56,9 @@ const PROVIDER_CATALOG = [
   // OpenRouter is a BACKEND of the openai-compat family with its own id —
   // its own key row, its own base URL, its own model bindings.
   { id: "openrouter",    label: "OpenRouter" },
+  // Pollinations is another BACKEND of the same family — its own key row
+  // (POLLINATIONS_API_KEY), its own base URL, its own model bindings.
+  { id: "pollinations",  label: "Pollinations" },
 ] as const;
 
 type ProviderId = (typeof PROVIDER_CATALOG)[number]["id"];
@@ -81,6 +90,10 @@ export async function GET() {
   // disagree with what the generation path will do (compat-plan §b).
   const orProvider = getRegisteredProvider("openrouter");
   const orBinding = getOpenRouterBinding();
+  // The Pollinations backend of the same family (its OpenAI-compatible SYNC
+  // image leg) — same treatment: the adapter decides readiness.
+  const polProvider = getRegisteredProvider("pollinations");
+  const polBinding = getPollinationsBinding();
   // The family adapter itself — a user-pointed backend (LiteLLM / new-api /
   // own gateway) is configured under the "openai-compat" id and needs a key
   // AND a base URL.
@@ -105,6 +118,13 @@ export async function GET() {
       // a stored `provider_configs.base_url` row never overrides it.
       baseUrl = orBinding?.baseUrl ?? OPENROUTER_BASE_URL;
       const check = orProvider?.checkReadiness(cfg, orBinding);
+      ready = check?.ready ?? hasKey;
+      reason = check?.reason;
+    } else if (p.id === "pollinations") {
+      // Same as OpenRouter: the binding pins the base URL (the generation
+      // host) and the adapter decides readiness (key + base URL).
+      baseUrl = polBinding?.baseUrl ?? POLLINATIONS_BASE_URL;
+      const check = polProvider?.checkReadiness(cfg, polBinding);
       ready = check?.ready ?? hasKey;
       reason = check?.reason;
     } else if (p.id === "openai-compat") {

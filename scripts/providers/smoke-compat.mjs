@@ -30,6 +30,13 @@
  *      "openrouter" entry (label, key source, base URL, readiness), the
  *      per-model provider union and the preset list; `PUT` accepts a
  *      `presetId` and rejects an unknown one.
+ *   9. POLLINATIONS (the family's second backend) — the "pollinations" alias
+ *      is registered, the 11 image bindings carry the spike's exact upstream
+ *      ids / base URL / key env / media store, the request body speaks the
+ *      Pollinations dialect (width/height/seed/image), the media upload
+ *      posts to the binding's media store and the "remote-url" staging
+ *      routes a local reference through it, and the settings endpoint
+ *      reports the backend.
  *
  * HOW TO RUN
  *
@@ -194,8 +201,12 @@ async function main() {
     BUILT_IN_BINDINGS,
     getAvailableProvidersForModel,
     getOpenRouterBinding,
+    getPollinationsBinding,
     OPENROUTER_BASE_URL,
     OPENROUTER_KEY_ENV,
+    POLLINATIONS_BASE_URL,
+    POLLINATIONS_KEY_ENV,
+    POLLINATIONS_MEDIA_UPLOAD_URL,
   } = bindingsMod;
 
   // ── 1. Registry ────────────────────────────────────────────────────────────
@@ -205,11 +216,14 @@ async function main() {
   ok("openrouter backend alias is registered", !!orProvider);
   eq("openrouter alias keeps the BACKEND id", orProvider?.id, "openrouter");
   eq("openrouter family adapter is registered", familyProvider?.id, "openai-compat");
-  eq("family adapter declares the openrouter alias", [...(familyProvider?.aliases ?? [])], ["openrouter"]);
+  eq("family adapter declares the openrouter alias", [...(familyProvider?.aliases ?? [])], ["openrouter", "pollinations"]);
   eq("openrouter staging default", orProvider?.mediaStaging, "data-url");
   eq("openrouter submits synchronously", orProvider?.capabilities?.syncSubmission, true);
   eq("openrouter has no polling", orProvider?.capabilities?.polling, false);
-  eq("openrouter has no media upload", orProvider?.capabilities?.mediaUpload, false);
+  // The family DOES implement the upload hook (a backend that stages media as
+  // "remote-url" needs it — see the Pollinations section below). OpenRouter
+  // stages as "data-url", so the hook never runs for it.
+  eq("the family implements the media-upload hook", familyProvider?.capabilities?.mediaUpload, true);
   ok("openrouter exposes checkReadiness", typeof orProvider?.checkReadiness === "function");
   ok("openrouter exposes submit", typeof orProvider?.submit === "function");
 
@@ -390,6 +404,12 @@ async function main() {
   );
   eq("the openrouter-dialect preset family", seeded.find((p) => p.presetId === "openrouter-dialect")?.family, "openrouter");
   eq("the standard-image preset family", seeded.find((p) => p.presetId === "standard-image")?.family, "standard");
+  const polPreset = seeded.find((p) => p.presetId === "pollinations-sync");
+  eq("the pollinations-sync preset family", polPreset?.family, "pollinations");
+  eq("the pollinations-sync preset maps the pixel width", polPreset?.params?.fields?.width, "width");
+  eq("the pollinations-sync preset maps the pixel height", polPreset?.params?.fields?.height, "height");
+  eq("the pollinations-sync preset maps the references", polPreset?.params?.fields?.image, "references");
+  ok("the pollinations-sync preset does NOT map the 'WxH' size", polPreset?.params?.fields?.size === undefined);
   ok("a seeded preset carries its params", Object.keys(seeded.find((p) => p.presetId === "standard-image")?.params ?? {}).length > 0);
   ok("the preset ids are unique", new Set(seeded.map((p) => p.presetId)).size === seeded.length);
 
@@ -557,13 +577,207 @@ async function main() {
   const afterPut = await (await route.GET()).json();
   eq("the provider reports its preset", afterPut.providers?.["openai-compat"]?.presetId, "standard-image");
 
+  // ── 9. Pollinations (the family's second backend) ─────────────────────────
+  section("Pollinations sync leg");
+  const polProvider = bootstrap.get("pollinations");
+  ok("pollinations backend alias is registered", !!polProvider);
+  eq("pollinations alias keeps the BACKEND id", polProvider?.id, "pollinations");
+  eq("pollinations submits synchronously", polProvider?.capabilities?.syncSubmission, true);
+  eq("pollinations has no polling", polProvider?.capabilities?.polling, false);
+  eq("pollinations implements the media-upload hook", polProvider?.capabilities?.mediaUpload, true);
+  ok("pollinations exposes uploadMedia", typeof polProvider?.uploadMedia === "function");
+
+  const polBindings = BUILT_IN_BINDINGS.filter((b) => b.providerId === "pollinations");
+  eq("11 Pollinations image bindings are code-defined", polBindings.length, 11);
+  const polRepresentative = getPollinationsBinding();
+  ok("a representative Pollinations binding resolves", !!polRepresentative);
+  eq("the representative binding is a Pollinations one", polRepresentative?.providerId, "pollinations");
+  eq("the representative binding carries the base URL", polRepresentative?.baseUrl, POLLINATIONS_BASE_URL);
+  eq("the representative binding carries the key env", polRepresentative?.keyEnv, POLLINATIONS_KEY_ENV);
+  eq("the representative binding stages as remote-url", polRepresentative?.mediaStaging, "remote-url");
+  eq("the representative binding names the media store", polRepresentative?.mediaUpload?.url, POLLINATIONS_MEDIA_UPLOAD_URL);
+
+  // The exact upstream ids of the binding-availability spike (2026-10-20).
+  const POL_UPSTREAM = {
+    "google-nano-banana": "google/gemini-2.5-flash-image",
+    "nano-banana-2": "google/gemini-3.1-flash-image",
+    "nano-banana-pro": "google/gemini-3-pro-image",
+    "nano-banana-2-lite": "google/gemini-3.1-flash-lite-image",
+    "z-image": "tongyi-mai/z-image-turbo",
+    "seedream-5-lite": "bytedance/seedream-5.0-lite",
+    "seedream-5-pro": "bytedance/seedream-5.0-pro",
+    "grok-imagine-image": "x-ai/grok-imagine-image",
+    "gpt-image-2": "openai/gpt-image-2",
+    "gpt-image-2-5-flare": "openai/gpt-image-2.5-flare",
+    "gpt-image-2-5-sunburst": "openai/gpt-image-2.5-sunburst",
+  };
+  for (const [modelId, upstreamId] of Object.entries(POL_UPSTREAM)) {
+    const b = polBindings.find((x) => x.modelId === modelId);
+    ok(`${modelId} has a Pollinations binding`, !!b);
+    eq(`${modelId} upstream id (spike)`, b?.upstreamModelId, upstreamId);
+    eq(`${modelId} base URL`, b?.baseUrl, POLLINATIONS_BASE_URL);
+    eq(`${modelId} endpoint path`, b?.pathOverride, "/v1/images/generations");
+    eq(`${modelId} key env`, b?.keyEnv, POLLINATIONS_KEY_ENV);
+    eq(`${modelId} stages as remote-url`, b?.mediaStaging, "remote-url");
+    eq(`${modelId} names the media store`, b?.mediaUpload?.url, POLLINATIONS_MEDIA_UPLOAD_URL);
+  }
+  const polZImage = polBindings.find((b) => b.modelId === "z-image");
+  eq("z-image is text-only upstream (no reference field)", polZImage?.paramMap?.fields?.image, undefined);
+  eq("z-image declares a zero reference cap", polZImage?.paramMap?.maxReferences, 0);
+  const polGrok = polBindings.find((b) => b.modelId === "grok-imagine-image");
+  eq("grok-imagine-image keeps Pollinations' 5-ref cap", polGrok?.paramMap?.maxReferences, 5);
+  ok("provider union of z-image includes pollinations", getAvailableProvidersForModel("z-image").includes("pollinations"));
+  ok("provider union of nano-banana-2 keeps openrouter + pollinations", ["openrouter", "pollinations"].every((id) => getAvailableProvidersForModel("nano-banana-2").includes(id)));
+
+  // ── Request body (stubbed fetch) ──────────────────────────────────────────
+  section("Pollinations request body (stubbed fetch)");
+  const polModel = modelConfig.IMAGE_MODELS.find((m) => m.id === "nano-banana-2");
+  ok("nano-banana-2 is in the image catalog", !!polModel);
+  const polBinding = polBindings.find((b) => b.modelId === "nano-banana-2");
+  const polCredentials = {
+    providerId: "pollinations",
+    apiKey: "sk-pol-smoke-key",
+    baseUrl: null,
+    extra: {},
+    keySource: "db",
+  };
+  const POL_REF_URL = "https://media.pollinations.ai/media/ref-a.png";
+  const polInput = {
+    taskId: "smoke-task-pol-1",
+    kind: "image",
+    model: polModel,
+    binding: polBinding,
+    prompt: "a lighthouse in a storm",
+    params: { aspectRatio: "16:9", quality: "2k", customWidth: 1024, customHeight: 768, seed: 42 },
+    media: {
+      references: [
+        {
+          originalUrl: POL_REF_URL,
+          kind: "image",
+          strategy: "remote-url",
+          url: POL_REF_URL,
+          mimeType: "image/png",
+        },
+      ],
+    },
+    credentials: polCredentials,
+  };
+
+  capturedCalls.length = 0;
+  stubbedResponse = () => fakeResponse({ data: [{ b64_json: PNG_BYTES.toString("base64") }] });
+  const polOutcome = await quiet(() => polProvider.submit(polInput));
+  eq("exactly one upstream request", capturedCalls.length, 1);
+  const polCall = capturedCalls[0] ?? { url: "", init: {} };
+  eq("request URL (base + the OpenAI-compatible path)", polCall.url, `${POLLINATIONS_BASE_URL}/v1/images/generations`);
+  eq("request method", polCall.init?.method, "POST");
+  eq("authorization header", polCall.init?.headers?.Authorization, "Bearer sk-pol-smoke-key");
+  const polBody = JSON.parse(String(polCall.init?.body ?? "{}"));
+  eq("body model (upstream id)", polBody.model, "google/gemini-3.1-flash-image");
+  eq("body prompt", polBody.prompt, polInput.prompt);
+  eq("body width (from customWidth)", polBody.width, 1024);
+  eq("body height (from customHeight)", polBody.height, 768);
+  eq("body seed", polBody.seed, 42);
+  eq("body image (the staged reference urls)", polBody.image, [POL_REF_URL]);
+  ok("the aspect ratio is NOT sent (Pollinations has no aspect field)", polBody.aspect_ratio === undefined);
+  ok("the quality tier is NOT sent (Pollinations has no quality field)", polBody.quality === undefined);
+  ok("the 'WxH' size field is NOT sent", polBody.size === undefined);
+  eq("submit resolves synchronously", polOutcome.mode, "sync");
+  eq("b64_json → one raw buffer", polOutcome.rawBuffers?.length, 1);
+
+  // The reference cap of the binding applies to the image array too.
+  capturedCalls.length = 0;
+  const manyPolRefs = Array.from({ length: 20 }, (_, i) => ({
+    originalUrl: `https://media.pollinations.ai/media/ref-${i}.png`,
+    kind: "image",
+    strategy: "remote-url",
+    url: `https://media.pollinations.ai/media/ref-${i}.png`,
+  }));
+  await quiet(() => polProvider.submit({ ...polInput, media: { references: manyPolRefs } }));
+  const cappedPolBody = JSON.parse(String(capturedCalls[0]?.init?.body ?? "{}"));
+  eq("upstream reference cap applied (14)", cappedPolBody.image?.length, 14);
+
+  // ── Media upload (the "remote-url" strategy) ──────────────────────────────
+  section("Pollinations media upload (remote-url staging)");
+  const uploadFixture = join(SMOKE_DIR, "ref-upload.png");
+  await writeFile(uploadFixture, PNG_BYTES);
+  capturedCalls.length = 0;
+  stubbedResponse = () => fakeResponse({ url: "https://media.pollinations.ai/media/uploaded-1.png" });
+  const uploadedUrl = await quiet(() =>
+    polProvider.uploadMedia("/generated/ref-upload.png", "image/png", polCredentials, polBinding),
+  );
+  eq("the upload posts to the binding's media store", capturedCalls[0]?.url, POLLINATIONS_MEDIA_UPLOAD_URL);
+  eq("the upload method", capturedCalls[0]?.init?.method, "POST");
+  eq("the upload carries the key", capturedCalls[0]?.init?.headers?.Authorization, "Bearer sk-pol-smoke-key");
+  const uploadForm = capturedCalls[0]?.init?.body;
+  ok("the upload body is multipart", typeof FormData !== "undefined" && uploadForm instanceof FormData);
+  const uploadedPart = uploadForm?.get?.("file");
+  ok("the upload carries the file part", !!uploadedPart);
+  eq("the uploaded bytes are the fixture", uploadedPart?.size, PNG_BYTES.length);
+  eq("the upload returns the stored url", uploadedUrl, "https://media.pollinations.ai/media/uploaded-1.png");
+
+  // A binding without an upload endpoint must fail LOUDLY (never silently
+  // drop the reference).
+  let uploadError = null;
+  try {
+    await quiet(() =>
+      polProvider.uploadMedia("/generated/ref-upload.png", "image/png", polCredentials, {
+        ...polBinding,
+        mediaUpload: undefined,
+      }),
+    );
+  } catch (err) {
+    uploadError = err;
+  }
+  ok("a binding without an upload endpoint throws", !!uploadError);
+  ok("the error names the missing endpoint", /media-upload endpoint/.test(uploadError?.message ?? ""), uploadError?.message);
+
+  // The stager routes a local reference through the upload hook.
+  capturedCalls.length = 0;
+  stubbedResponse = () => fakeResponse({ url: "https://media.pollinations.ai/media/uploaded-2.png" });
+  eq(
+    "the Pollinations binding resolves to remote-url",
+    typesMod.resolveMediaStagingStrategy("image-edit", polBinding, polProvider.mediaStaging),
+    "remote-url",
+  );
+  const polStaged = await stagerMod.stageInputMedia(
+    { references: ["/generated/ref-upload.png"] },
+    stagerMod.createStagingResolver("image-edit", polBinding, polProvider),
+    polCredentials,
+  );
+  eq("the local reference was uploaded", capturedCalls.length, 1);
+  eq("the upload went to the media store", capturedCalls[0]?.url, POLLINATIONS_MEDIA_UPLOAD_URL);
+  eq("the staged reference carries the uploaded url", polStaged.references?.[0]?.url, "https://media.pollinations.ai/media/uploaded-2.png");
+  eq("the staged strategy", polStaged.references?.[0]?.strategy, "remote-url");
+  eq("the staged originalUrl is never rewritten", polStaged.references?.[0]?.originalUrl, "/generated/ref-upload.png");
+
+  // ── Settings endpoint (the Pollinations backend) ──────────────────────────
+  section("GET /api/settings/providers (pollinations)");
+  const savedPolKey = process.env[POLLINATIONS_KEY_ENV];
+  process.env[POLLINATIONS_KEY_ENV] = "sk-pol-env-key";
+  const polPayload = await (await route.GET()).json();
+  if (savedPolKey === undefined) delete process.env[POLLINATIONS_KEY_ENV];
+  else process.env[POLLINATIONS_KEY_ENV] = savedPolKey;
+  const polEntry = polPayload.providers?.pollinations;
+  ok("the response carries a pollinations entry", !!polEntry);
+  eq("pollinations label", polEntry?.label, "Pollinations");
+  eq("pollinations base URL", polEntry?.baseUrl, POLLINATIONS_BASE_URL);
+  eq("pollinations key source (env fallback)", polEntry?.keySource, "env");
+  eq("pollinations hasKey (env fallback)", polEntry?.hasKey, true);
+  eq("pollinations ready (key present)", polEntry?.ready, true);
+  ok("bindingsByModel unions pollinations for z-image", (polPayload.bindingsByModel?.["z-image"] ?? []).includes("pollinations"));
+  ok("bindingsByModel unions pollinations for nano-banana-2", (polPayload.bindingsByModel?.["nano-banana-2"] ?? []).includes("pollinations"));
+  ok("the response carries no pollinations api key", !JSON.stringify(polPayload).includes("sk-pol-env-key"));
+
   // ── Client surface (source-level: the client bundle pulls React/zustand) ──
   section("client surface (source-level)");
   const clientProviders = await readFile(join(ROOT, "lib/providers.ts"), "utf8");
   ok("client PROVIDERS lists openrouter", /id:\s*"openrouter"/.test(clientProviders));
   ok("client PROVIDERS labels it OpenRouter", /id:\s*"openrouter",\s*label:\s*"OpenRouter"/.test(clientProviders));
+  ok("client PROVIDERS lists pollinations", /id:\s*"pollinations"/.test(clientProviders));
+  ok("client PROVIDERS labels it Pollinations", /id:\s*"pollinations",\s*label:\s*"Pollinations"/.test(clientProviders));
   const clientIcon = await readFile(join(ROOT, "components/ui/ProviderIcon.tsx"), "utf8");
   ok("ProviderBrandIcon has an openrouter mark", /id === "openrouter"/.test(clientIcon));
+  ok("ProviderBrandIcon has a pollinations mark", /id === "pollinations"/.test(clientIcon));
   ok("no client PROVIDERS.find() non-null assertion is left", !/PROVIDERS\.find\([^)]*\)!/.test(await readFile(join(ROOT, "components/SettingsModal.tsx"), "utf8")));
 
   // ── Live step (opt-in) ────────────────────────────────────────────────────

@@ -423,6 +423,12 @@ const COMPAT_ENDPOINTS: {
     baseUrlPinned: true,
   },
   {
+    id: "pollinations",
+    label: "Pollinations",
+    hint: "OpenAI-compatible image backend (Pollinations sync leg).",
+    baseUrlPinned: true,
+  },
+  {
     id: "openai-compat",
     label: "Custom OpenAI-Compatible",
     hint: "Any OpenAI-speaking endpoint (LiteLLM, new-api, your own gateway).",
@@ -553,7 +559,9 @@ function CompatEndpointCard({
           }}
         >
           <ProviderBrandIcon id={id} size={16} />
-          {id === "openrouter" ? null : (
+          {/* Backends with their own brand mark (OpenRouter "OR", Pollinations
+              "POL") don't need the generic "OC" fallback beside it. */}
+          {id === "openrouter" || id === "pollinations" ? null : (
             <span
               style={{
                 fontSize: "10px", fontWeight: 700, letterSpacing: "-0.02em",

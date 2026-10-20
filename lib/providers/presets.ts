@@ -28,6 +28,8 @@ const FIELD_SOURCES: readonly CompatFieldSource[] = [
   "quality",
   "resolution",
   "size",
+  "width",
+  "height",
   "seed",
   "references",
   "outputFormat",
@@ -110,17 +112,25 @@ export const PARAM_PRESET_SEEDS: readonly ParamPresetSeed[] = [
   },
   {
     // Pollinations' OpenAI-compatible SYNC leg (`/v1/images/generations`):
-    // the standard body plus the two privacy switches the backend understands.
-    // The size/seed keys follow the OpenAI-style leg — a backend that wants
-    // `width`/`height` instead overrides them at the binding level.
+    // the standard body PLUS the backend's native parameter names — the pixel
+    // size rides `width`/`height` (the backend takes no aspect-ratio field
+    // and no "WxH" `size` string), the references ride `image` (the OpenAI
+    // `images/edits` array shape) and the two privacy switches the backend
+    // understands.
+    //
+    // The code-seeded Pollinations bindings carry the same dialect in their
+    // own paramMap — this preset is the USER-pointed equivalent (a gateway
+    // that speaks the Pollinations dialect).
     presetId: "pollinations-sync",
     family: "pollinations",
     paramsJson: `{
       "modelKey": "model",
       "fields": {
         "prompt": "prompt",
-        "size": "size",
-        "seed": "seed"
+        "width": "width",
+        "height": "height",
+        "seed": "seed",
+        "image": "references"
       },
       "constants": {
         "nologo": "true",

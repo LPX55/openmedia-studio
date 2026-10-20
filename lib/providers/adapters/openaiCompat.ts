@@ -11,6 +11,9 @@
  *   binding.keyEnv        env var with the API key   (the stored DB key wins)
  *   binding.paramMap      the DIALECT: which body key each normalized param
  *                         feeds, plus value maps (catalog tier → upstream value)
+ *   binding.mediaUpload   the media-upload endpoint   (only for the
+ *                         "remote-url" staging strategy — e.g. Pollinations'
+ *                         media store)
  *
  * The family is SYNC-ONLY: one POST returns the finished image(s) — there is
  * no upstream task id, hence NO `poll()` (compat-plan §b). Async compat
@@ -22,9 +25,12 @@
  * allowed). `binding.textOnlyUpstreamId` is still honoured when a binding
  * defines one — the family just doesn't need it.
  *
- * SERVER-ONLY (reads `process.env` for the per-backend key) — never import
- * this module from client code.
+ * SERVER-ONLY (reads `process.env` for the per-backend key, touches the local
+ * media dir) — never import this module from client code.
  */
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { MEDIA_DIR } from "../../guest/paths";
 import type { CompatFieldSource, CompatParamMap, ModelProviderBinding } from "../bindings";
 import type {
   GenerateInput,
@@ -129,6 +135,10 @@ function resolveFieldValue(
       return p.customWidth && p.customHeight
         ? `${p.customWidth}x${p.customHeight}`
         : undefined;
+    case "width":
+      return typeof p.customWidth === "number" ? p.customWidth : undefined;
+    case "height":
+      return typeof p.customHeight === "number" ? p.customHeight : undefined;
     case "seed":
       return typeof p.seed === "number" ? p.seed : undefined;
     case "references":
@@ -185,7 +195,10 @@ function loggableBody(
   for (const [key, source] of Object.entries(spec.fields ?? {})) {
     if (source !== "references") continue;
     const v = out[key];
-    if (Array.isArray(v)) out[key] = `[${v.length} staged reference(s)]`;
+    // The staged references are urls (or data-url blobs) — only their count
+    // is logged, whatever shape the dialect asked for.
+    const count = Array.isArray(v) ? v.length : v === undefined ? 0 : 1;
+    out[key] = `[${count} staged reference(s)]`;
   }
   return out;
 }
@@ -213,6 +226,14 @@ function buildBody(
       // Upstream reference cap (spike: OR caps differ per model).
       if (source === "references" && spec.maxReferences !== undefined) {
         value = value.slice(0, spec.maxReferences);
+        // A cap of 0 (a text-only upstream model) means "no references" — the
+        // field is dropped entirely, never sent as an empty array.
+        if (value.length === 0) continue;
+      }
+      // A backend whose reference field takes ONE url (the native Pollinations
+      // `image=` shape) asks for it explicitly.
+      if (source === "references" && spec.referenceMode === "first") {
+        value = value[0];
       }
     }
     body[key] = value;
@@ -265,6 +286,173 @@ function parseResponse(
   return { mediaUrls, rawBuffers };
 }
 
+// ── Media upload (the "remote-url" staging strategy) ─────────────────────────
+
+/** MIME by file extension — the upload's Content-Type for a local file. */
+const MIME_BY_EXT: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+};
+
+/**
+ * Read the bytes of a raw input media string — the three shapes the stager
+ * hands to `uploadMedia()`: a `data:` URI, a local `/generated/…` path, or a
+ * private-host http(s) URL (the stager routes only NON-remote inputs here —
+ * a public http(s) url passes through untouched, the pinned rule).
+ */
+async function readLocalBytes(
+  raw: string,
+  mimeType: string,
+): Promise<{ buffer: Buffer; mimeType: string; filename: string }> {
+  if (raw.startsWith("data:")) {
+    const m = /^data:([^;,]+)?((?:;[^;,]+)*),([\s\S]*)$/.exec(raw);
+    if (!m) throw new Error("openai-compat upload: malformed data: URI");
+    const mime = m[1] || mimeType || "application/octet-stream";
+    const payload = m[3] ?? "";
+    const buffer = /;base64/i.test(m[2] ?? "")
+      ? Buffer.from(payload, "base64")
+      : Buffer.from(decodeURIComponent(payload), "utf8");
+    return { buffer, mimeType: mime, filename: `file.${extForMime(mime)}` };
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    const res = await fetch(raw);
+    if (!res.ok) {
+      throw new Error(`openai-compat upload: source fetch failed (${res.status}): ${raw}`);
+    }
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const mime = res.headers.get("content-type")?.split(";")[0]?.trim() || mimeType;
+    return { buffer, mimeType: mime, filename: `file.${extForMime(mime)}` };
+  }
+
+  const rel = raw.replace(/^\/generated\//, "").replace(/^\/+/, "");
+  const buffer = await readFile(join(MEDIA_DIR, rel));
+  const ext = rel.split(".").pop()?.toLowerCase() ?? "";
+  const mime = mimeType || MIME_BY_EXT[ext] || "application/octet-stream";
+  const name = rel.split("/").pop() || `file.${ext || "bin"}`;
+  return { buffer, mimeType: mime, filename: name };
+}
+
+/** File extension for a MIME type — the multipart filename ("bin" fallback). */
+function extForMime(mime: string): string {
+  const sub = mime.split("/")[1]?.split(";")[0]?.toLowerCase() ?? "";
+  if (sub === "jpeg") return "jpg";
+  for (const [ext, known] of Object.entries(MIME_BY_EXT)) {
+    if (known === mime) return ext;
+  }
+  return "bin";
+}
+
+/**
+ * Pull the media URL out of an upload response — generic across the shapes
+ * media stores answer with: a JSON object (`{"url": …}`, `{"data": {"url": …}}`,
+ * `file_url`/`image_url`/`media_url`/`output_url`/`href`), a bare URL string,
+ * or a redirect (`Location` header).
+ */
+function extractUploadUrl(text: string, location: string | null): string {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{")) {
+    let json: Record<string, unknown>;
+    try {
+      json = JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      json = {};
+    }
+    const nested = (json.data ?? json.result ?? json.file) as Record<string, unknown> | undefined;
+    const candidates = [
+      json.url,
+      json.file_url,
+      json.image_url,
+      json.media_url,
+      json.output_url,
+      json.href,
+      json.path,
+      nested?.url,
+      nested?.file_url,
+      nested?.image_url,
+      nested?.media_url,
+      nested?.output_url,
+      nested?.href,
+      nested?.path,
+    ];
+    for (const c of candidates) {
+      if (typeof c === "string" && c.trim()) return c.trim();
+    }
+  }
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (location && /^https?:\/\//i.test(location)) return location;
+  throw new Error(
+    `openai-compat upload: the response carried no media URL (${trimmed.slice(0, 200)})`,
+  );
+}
+
+/**
+ * A plain ArrayBuffer-backed copy of the bytes.
+ *
+ * Node's `Buffer` is a POOLED view (`ArrayBufferLike`), which the fetch /
+ * Blob typings reject — the copy hands them a plain `Uint8Array`.
+ */
+function toBodyBytes(buffer: Buffer): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(buffer.byteLength);
+  out.set(buffer);
+  return out;
+}
+
+/**
+ * POST the bytes to the binding's media-upload endpoint and return the URL the
+ * backend handed back.
+ *
+ * The endpoint, the field name and the body encoding come from the BINDING
+ * (compat-plan §a: a vendor difference is configuration, never a code
+ * branch) — this function is the generic realisation of that configuration.
+ */
+async function uploadToMediaStore(
+  spec: NonNullable<ModelProviderBinding["mediaUpload"]>,
+  bytes: { buffer: Buffer; mimeType: string; filename: string },
+  apiKey: string | null,
+): Promise<string> {
+  const field = spec.field ?? "file";
+  const encoding = spec.encoding ?? "multipart";
+  const headers: Record<string, string> = { ...(spec.headers ?? {}) };
+  if (apiKey && !headers.Authorization && !headers.authorization) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  let body: BodyInit;
+  if (encoding === "raw") {
+    headers["Content-Type"] = headers["Content-Type"] ?? bytes.mimeType;
+    body = toBodyBytes(bytes.buffer);
+  } else if (encoding === "base64") {
+    headers["Content-Type"] = headers["Content-Type"] ?? "application/json";
+    body = JSON.stringify({ [field]: bytes.buffer.toString("base64") });
+  } else {
+    const form = new FormData();
+    form.append(field, new Blob([toBodyBytes(bytes.buffer)], { type: bytes.mimeType }), bytes.filename);
+    for (const [k, v] of Object.entries(spec.fields ?? {})) form.append(k, v);
+    body = form; // fetch sets the multipart boundary itself
+  }
+
+  const res = await fetch(spec.url, {
+    method: "POST",
+    headers,
+    body,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`openai-compat upload failed (${res.status}): ${text.slice(0, 300)}`);
+  }
+  return extractUploadUrl(text, res.headers.get("location"));
+}
+
 // ── Adapter ──────────────────────────────────────────────────────────────────
 
 export const openaiCompatProvider: GenerationProvider = {
@@ -276,8 +464,12 @@ export const openaiCompatProvider: GenerationProvider = {
    * (`provider_configs`), its own base URL and its own `model_bindings` rows
    * (PK `(model_id, provider_id)`). The registry registers an id-overridden
    * view per alias, so `provider.id` stays the BACKEND id.
+   *
+   * "openrouter" — the OpenRouter image dialect (data-url staging).
+   * "pollinations" — Pollinations' OpenAI-compatible SYNC leg (remote-url
+   * staging: local references are uploaded to its media store first).
    */
-  aliases: ["openrouter"],
+  aliases: ["openrouter", "pollinations"],
   mediaStaging: "data-url",
   // The only family whose dialect is described by a PARAM PRESET (compat-plan
   // §c) — the registry resolves the preset layer into the binding's paramMap.
@@ -285,8 +477,41 @@ export const openaiCompatProvider: GenerationProvider = {
   capabilities: {
     syncSubmission: true,
     polling: false,
-    mediaUpload: false,
+    // The upload hook IS implemented (see `uploadMedia` below) — it is only
+    // REACHED by a binding that stages media as "remote-url" (Pollinations);
+    // the data-url backends never call it.
+    mediaUpload: true,
     mediaStaging: "data-url",
+  },
+
+  /**
+   * Upload a local media file to the BACKEND's media store and return its URL.
+   *
+   * Called by the stager ONLY when the resolved staging strategy is
+   * "remote-url" AND the input is not already a public URL (a data-url
+   * backend never reaches this path — the hook is opt-in per binding).
+   *
+   * The endpoint + field convention come from the BINDING (`mediaUpload`),
+   * never from a vendor branch in code (compat-plan §a): Pollinations'
+   * binding points at its media store (`media.pollinations.ai/upload`), any
+   * other backend points at its own.
+   */
+  async uploadMedia(
+    localPathOrDataUrl: string,
+    mimeType: string,
+    cfg: ProviderRuntimeConfig,
+    binding?: ModelProviderBinding,
+  ): Promise<string> {
+    const spec = binding?.mediaUpload;
+    if (!spec?.url) {
+      throw new Error(
+        `openai-compat: the "${binding?.providerId ?? "unknown"}" backend stages media as ` +
+          `"remote-url" but its binding declares no media-upload endpoint (mediaUpload.url).`,
+      );
+    }
+    const apiKey = resolveApiKey(cfg, binding);
+    const bytes = await readLocalBytes(localPathOrDataUrl, mimeType);
+    return uploadToMediaStore(spec, bytes, apiKey);
   },
 
   /**

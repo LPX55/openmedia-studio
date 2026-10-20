@@ -222,8 +222,21 @@ export interface GenerationProvider {
   /** Optional execution-capability descriptor (C5) for readiness derivation. */
   readonly capabilities?: GenerationCapabilities;
 
-  /** Required when the effective staging strategy is "remote-url" (e.g. kieUpload.ts). */
-  uploadMedia?(localPathOrDataUrl: string, mimeType: string, cfg: ProviderRuntimeConfig): Promise<string>;
+  /**
+   * Required when the effective staging strategy is "remote-url" (e.g. kieUpload.ts).
+   *
+   * The BINDING is handed over as an optional 4th argument: an openai-compat
+   * backend uploads to its OWN media store, and that endpoint (plus its field
+   * convention) is part of the binding's dialect — not of the adapter (compat
+   * plan §b: dialect differences live in the binding, never in a code branch).
+   * Adapters that upload to a fixed host (kie) simply ignore it.
+   */
+  uploadMedia?(
+    localPathOrDataUrl: string,
+    mimeType: string,
+    cfg: ProviderRuntimeConfig,
+    binding?: ModelProviderBinding,
+  ): Promise<string>;
 
   /**
    * Validates whether required credentials + endpoint config are present.

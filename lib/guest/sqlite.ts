@@ -132,8 +132,12 @@ function createSchema(d: DatabaseSync): void {
 /**
  * Seed the code-defined param presets (compat-plan §c).
  *
- * Idempotent: `ON CONFLICT(preset_id) DO NOTHING` — re-opening the DB never
- * duplicates a row and never overwrites a (future) user-edited preset.
+ * Idempotent: `ON CONFLICT(preset_id) DO UPDATE` — re-opening the DB never
+ * duplicates a row, and the CODE SEED is authoritative: v1 has no preset
+ * editor (the Settings picker is view-only), so a corrected seed (e.g. the
+ * Pollinations dialect) must reach installs that already carry the old row.
+ * WHEN the preset editor lands, this has to become "update only rows the user
+ * did not touch" — the seeds carry no user-modified marker yet.
  *
  * FAIL LOUDLY: every seed's params JSON is parsed + validated BEFORE it is
  * written, so a typo in a seed aborts the boot with a clear message instead of
@@ -143,7 +147,8 @@ function seedParamPresets(d: DatabaseSync): void {
   const ts = new Date().toISOString();
   const stmt = d.prepare(
     "INSERT INTO param_presets (preset_id, family, params_json, updated_at) VALUES (?, ?, ?, ?) " +
-      "ON CONFLICT(preset_id) DO NOTHING",
+      "ON CONFLICT(preset_id) DO UPDATE SET family = excluded.family, " +
+      "params_json = excluded.params_json, updated_at = excluded.updated_at",
   );
   d.exec("BEGIN");
   try {

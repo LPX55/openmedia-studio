@@ -73,15 +73,22 @@ export type StagingChainResolver = (kind: MediaKind) => StagingPlan;
 /**
  * Composes the documented resolution order with the provider's upload hook:
  * `binding.mediaStagingByOperation[operation] → binding.mediaStaging → provider.mediaStaging`.
+ *
+ * The BINDING is handed to the upload hook as its 4th argument: an
+ * openai-compat backend uploads to the media store its binding names (the
+ * endpoint is part of the dialect, not of the adapter).
  */
 export function createStagingResolver(
   operation: MediaStagingOperation,
   binding: ModelProviderBinding | undefined,
   provider: Pick<GenerationProvider, "mediaStaging" | "uploadMedia">,
 ): StagingChainResolver {
+  const upload = provider.uploadMedia;
   return () => ({
     strategy: resolveMediaStagingStrategy(operation, binding, provider.mediaStaging),
-    uploadMedia: provider.uploadMedia?.bind(provider),
+    uploadMedia: upload
+      ? (raw, mimeType, cfg) => upload.call(provider, raw, mimeType, cfg, binding)
+      : undefined,
   });
 }
 

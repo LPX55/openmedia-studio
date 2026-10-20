@@ -9,7 +9,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import type { ProviderId } from "@/lib/providers";
 
-/** Backend brand mark for the provider pill/toggle (kie/azure/codex/openrouter) — distinct from NodeProviderIcon's model-brand icons. */
+/** Backend brand mark for the provider pill/toggle (kie/azure/codex/openrouter/pollinations) — distinct from NodeProviderIcon's model-brand icons. */
 export function ProviderBrandIcon({ id, size = 12 }: { id: ProviderId; size?: number }) {
   if (id === "kie") {
     return (
@@ -54,6 +54,28 @@ export function ProviderBrandIcon({ id, size = 12 }: { id: ProviderId; size?: nu
         }}
       >
         OR
+      </span>
+    );
+  }
+  // Pollinations: same pattern as the OpenRouter wordmark — the repo ships no
+  // brand asset, so a NEUTRAL wordmark ("POL") off the app's teal accent
+  // (#2DD4BF) keeps a third-party backend reading as neutral.
+  if (id === "pollinations") {
+    return (
+      <span
+        className="text-[#E6E6E6] shrink-0"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: `${size}px`,
+          height: `${size}px`,
+          fontSize: `${Math.max(6, Math.round(size * 0.46))}px`,
+          fontWeight: 700,
+          letterSpacing: "-0.04em",
+        }}
+      >
+        POL
       </span>
     );
   }

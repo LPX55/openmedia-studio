@@ -115,7 +115,7 @@ function referenceUrls(input: GenerateInput): string[] {
 function resolveFieldValue(
   source: CompatFieldSource,
   input: GenerateInput,
-): string | number | boolean | string[] | undefined {
+): string | number | string[] | undefined {
   const p = input.params;
   switch (source) {
     case "prompt":
@@ -141,12 +141,6 @@ function resolveFieldValue(
       return typeof p.customHeight === "number" ? p.customHeight : undefined;
     case "seed":
       return typeof p.seed === "number" ? p.seed : undefined;
-    case "seedBoolean":
-      // Boolean-seed dialects (OpenRouter qwen-image-2.1 family: seed is a
-      // randomize flag, not a value). Absent seed ⇒ randomize (true); an
-      // explicit numeric seed has no upstream representation and maps to
-      // false. Documented limitation, not silent behavior.
-      return p.seed == null;
     case "references":
       return referenceUrls(input);
     case "outputFormat": {
@@ -161,8 +155,8 @@ function resolveFieldValue(
 /** Apply a dialect value map (normalized value → upstream value). */
 function applyValueMap(
   valueMap: Record<string, string> | undefined,
-  value: string | number | boolean | string[],
-): string | number | boolean | string[] {
+  value: string | number | string[],
+): string | number | string[] {
   if (!valueMap || typeof value !== "string") return value;
   return valueMap[value] ?? value;
 }

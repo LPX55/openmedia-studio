@@ -49,7 +49,6 @@ export type VideoPayloadFamily =
  *  - "width"        — the custom pixel WIDTH (a number, not "WxH")
  *  - "height"       — the custom pixel HEIGHT (a number, not "WxH")
  *  - "seed"         — the seed
- *  - "seedBoolean"  — randomize flag for boolean-`seed` dialects (absent numeric seed ⇒ true; explicit numeric seed has no upstream representation ⇒ false)
  *  - "references"   — the staged reference images
  *  - "outputFormat" — the catalog's declared output format
  */
@@ -63,7 +62,6 @@ export type CompatFieldSource =
   | "width"
   | "height"
   | "seed"
-  | "seedBoolean"
   | "references"
   | "outputFormat";
 
@@ -524,9 +522,10 @@ const openRouterImageBindings: ModelProviderBinding[] = [
   },
 
   // qwen-image-2.1-turbo → OR "qwen/qwen-image-2.1-turbo" (verified live
-  // 2026-10-26: sole provider alibaba; seed is BOOLEAN randomize flag,
-  // $0.0184 flat at 1K+2K). seedBoolean maps absent seed ⇒ true; an
-  // explicit numeric seed has no upstream representation ⇒ false.
+  // 2026-10-26: sole provider alibaba; despite the endpoint listing's
+  // `seed: boolean` metadata, runtime validation REQUIRES a numeric seed
+  // (ZodError otherwise) — trust runtime, not the listing. Absent seed ⇒
+  // field omitted. $0.0184 flat at 1K+2K).
   {
     modelId: "qwen-image-2.1-turbo",
     providerId: "openrouter",
@@ -536,15 +535,15 @@ const openRouterImageBindings: ModelProviderBinding[] = [
     pathOverride: OPENROUTER_IMAGE_PATH,
     keyEnv: OPENROUTER_KEY_ENV,
     paramMap: {
-      fields: { ...OR_IMAGE_FIELDS, resolution: "tier", seed: "seedBoolean" },
+      fields: { ...OR_IMAGE_FIELDS, resolution: "tier", seed: "seed" },
       valueMaps: { resolution: { "1k": "1K", "2k": "2K" } },
       maxReferences: 4,
     },
   },
 
   // qwen-image-2.1-pro → OR "qwen/qwen-image-2.1-pro" — 2.5x quality tier
-  // ($0.046), same boolean-seed dialect and caps as turbo (assumed from the
-  // shared family schema; re-verify against /images/models if it 400s).
+  // ($0.046), same caps as turbo. Same numeric-seed correction applies:
+  // the endpoint listing claims boolean, runtime requires a number.
   {
     modelId: "qwen-image-2.1-pro",
     providerId: "openrouter",
@@ -554,7 +553,7 @@ const openRouterImageBindings: ModelProviderBinding[] = [
     pathOverride: OPENROUTER_IMAGE_PATH,
     keyEnv: OPENROUTER_KEY_ENV,
     paramMap: {
-      fields: { ...OR_IMAGE_FIELDS, resolution: "tier", seed: "seedBoolean" },
+      fields: { ...OR_IMAGE_FIELDS, resolution: "tier", seed: "seed" },
       valueMaps: { resolution: { "1k": "1K", "2k": "2K" } },
       maxReferences: 4,
     },

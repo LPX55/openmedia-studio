@@ -1086,12 +1086,12 @@ export function AppSidebar() {
 
             <DropdownMenuSeparator className="!bg-white/[0.07] !my-0 !mx-0" />
 
-            {/* Purchase Kie Credits */}
+            {/* Purchase credits */}
             <DropdownMenuItem
               className="flex items-center justify-between rounded-none px-4 py-3 text-[14px] text-white/60 hover:text-white focus:text-white focus:bg-white/[0.06] cursor-pointer"
-              onClick={() => window.open("https://kie.ai?ref=25abb3f2236cbff9780ab9c2f84479ec", "_blank")}
+              onClick={() => window.open("https://kie.ai", "_blank")}
             >
-              <span>Purchase Kie Credits</span>
+              <span>Purchase Credits</span>
               <CreditIcon size={15} />
             </DropdownMenuItem>
 

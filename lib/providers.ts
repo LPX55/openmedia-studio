@@ -194,7 +194,7 @@ function readinessReason(providerId: ProviderId): string {
     case "pollinations":
       return "Pollinations is not configured — add its API key in Settings (or set POLLINATIONS_API_KEY).";
     default:
-      return "No Kie.ai API key configured. Add one in Settings.";
+      return "This provider is not configured — add its API key in Settings.";
   }
 }
 

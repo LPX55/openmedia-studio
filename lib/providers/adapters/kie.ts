@@ -45,7 +45,7 @@ interface KlingElementInput {
 function requireKey(cfg: ProviderRuntimeConfig): string {
   if (!cfg.apiKey) {
     // Same message the routes used to return with 401.
-    throw new Error("No Kie.ai API key configured. Add one in Settings.");
+    throw new Error("No API key configured for this provider. Add one in Settings.");
   }
   return cfg.apiKey;
 }
@@ -466,7 +466,7 @@ async function submitKie(input: GenerateInput): Promise<SubmitOutcome> {
   });
 
   if (!createRes.ok) {
-    if (createRes.status === 401) throw new Error("Invalid Kie.ai API key — please update it in Settings.");
+    if (createRes.status === 401) throw new Error("Invalid API key — please update it in Settings.");
     throw new Error(await createRes.text());
   }
 
@@ -538,7 +538,7 @@ async function pollKie(
   }
 
   const apiKey = cfg.apiKey;
-  if (!apiKey) return { state: "error", error: "No Kie.ai API key configured. Add one in Settings." };
+  if (!apiKey) return { state: "error", error: "No API key configured for this provider. Add one in Settings." };
 
   const res = await fetch(
     `${KIE_BASE}/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(upstreamTaskId)}`,
@@ -584,7 +584,7 @@ export const kieProvider: GenerationProvider = {
   checkReadiness(cfg: ProviderRuntimeConfig): { ready: boolean; reason?: string } {
     return cfg.keySource !== "none" && !!cfg.apiKey
       ? { ready: true }
-      : { ready: false, reason: "No Kie.ai API key configured. Add one in Settings." };
+      : { ready: false, reason: "No API key configured for this provider. Add one in Settings." };
   },
 
   submit: submitKie,

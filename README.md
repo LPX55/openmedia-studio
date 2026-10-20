@@ -43,7 +43,7 @@ The app is **not code-signed** yet:
 ## 🚀 First run
 
 1. Launch HeliosGen.
-2. Open **Settings → API Keys** and paste your **[kie.ai](https://kie.ai?ref=25abb3f2236cbff9780ab9c2f84479ec) API key**.
+2. Open **Settings → API Keys** and paste the API key for the provider you want to use.
 3. Start generating.
 
 Everything stays on your machine. Generations, uploads, folders, workflows and
@@ -102,17 +102,15 @@ Build reusable AI pipelines with:
 - all running 100% locally on your machine.
 
 No subscriptions.  
-No disappearing credits.  
 No vendor lock-in.  
-No cloud, no accounts — just a local app and your own kie.ai key.
+No cloud, no accounts — just a local app and your own provider keys.
 
 ---
 
 # 💳 Credits
 
-HeliosGen now works with <a href="https://kie.ai?ref=25abb3f2236cbff9780ab9c2f84479ec" target="_blank">kie.ai</a>.
-
-All credits are purchased directly on your own account and never expire.
+Generation is billed by the provider you configure. Credits are purchased
+directly on your own provider account and never expire.
 
 That means:
 - no monthly reset,
@@ -120,7 +118,7 @@ That means:
 - no subscription lock-in,
 - and full ownership of your usage.
 
-You only pay for what you generate.
+You only pay your provider for what you generate.
 
 ---
 
@@ -134,7 +132,7 @@ You only pay for what you generate.
 - Parallel & sequential pipeline execution
 - Real-time generation history
 - 100% local — your data never leaves your machine
-- Bring your own kie.ai key
+- Bring your own provider keys
 - Modern responsive UI
 
 ---
@@ -167,13 +165,13 @@ More models are coming.
 | App | Next.js + React + TypeScript (bundled Node sidecar) |
 | Database | SQLite (local) |
 | Storage | Local disk |
-| AI Backend | kie.ai |
+| AI Backend | Pluggable providers (Kie.ai, Azure AI Foundry, Codex CLI, OpenAI-compatible endpoints) |
 
 ---
 
 # 🤖 Codex CLI (optional — alternate GPT Image 2 backend)
 
-Instead of routing GPT Image 2 through kie.ai credits, HeliosGen can generate through your own ChatGPT Codex subscription via [`codex-imagegen-cli`](https://github.com/jdmnk/codex-imagegen-cli). The desktop app picks up `codex` from your `PATH` automatically; if it's missing, the feature just shows **NOT CONFIGURED** and everything else keeps working.
+Instead of routing GPT Image 2 through a hosted generation provider, HeliosGen can generate through your own ChatGPT Codex subscription via [`codex-imagegen-cli`](https://github.com/jdmnk/codex-imagegen-cli). The desktop app picks up `codex` from your `PATH` automatically; if it's missing, the feature just shows **NOT CONFIGURED** and everything else keeps working.
 
 Requirements:
 - A ChatGPT Plus/Pro/Team/Enterprise account with Codex access

@@ -95,7 +95,7 @@ export function WorkflowHero() {
             <span className="size-1 shrink-0 rounded-full border border-black/25 bg-[linear-gradient(180deg,#7D7D7D_0%,#92AFAD_100%)]" />
             <div className="w-[132px] rounded-[10px] bg-[linear-gradient(126deg,rgba(255,255,255,0.03)_2%,rgba(255,255,255,0.10)_98%)] p-[6px] shadow-[inset_-0.2px_0.2px_0.2px_rgba(255,255,255,0.5)]">
               <p className="line-clamp-6 text-[8px] leading-[11px] font-medium text-white/50">
-                Generate stunning AI images and videos with customizable workflows. Connect nodes, set parameters, and create at scale.
+                Generate AI images and videos with customizable workflows. Connect nodes and set parameters.
               </p>
             </div>
             <span className="size-1 shrink-0 rounded-full border border-black/25 bg-[linear-gradient(180deg,#7D7D7D_0%,#92AFAD_100%)]" />
@@ -115,7 +115,7 @@ export function WorkflowHero() {
                 HeliosGen
               </p>
               <h1 className="hero-title text-[32px] leading-[34px] font-bold tracking-[-1.28px] text-white uppercase md:text-[40px] md:leading-[40px] md:tracking-[-1.6px]">
-                Build AI workflows<br />and generate stunning media
+                Build AI workflows<br />and generate media
               </h1>
             </div>
             <span className="size-1 shrink-0 rounded-full border border-black/25 bg-[linear-gradient(180deg,#7D7D7D_0%,#92AFAD_100%)]" />

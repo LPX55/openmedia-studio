@@ -191,7 +191,7 @@ export async function POST(req: NextRequest) {
   const apiKey = await getKieToken(req);
   if (!apiKey) {
     return new Response(
-      JSON.stringify({ error: "No Kie.ai API key configured. Add one in Settings." }),
+      JSON.stringify({ error: "No API key configured for this provider. Add one in Settings." }),
       { status: 401, headers: { "Content-Type": "application/json" } }
     );
   }

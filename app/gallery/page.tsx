@@ -472,7 +472,7 @@ function GalleryLoggedOut({ tab }: { tab: Tab }) {
               {names[idx]}
             </p>
           </div>
-          <p style={{ fontSize: "clamp(13px,1.2vw,15px)", color: "rgba(255,255,255,0.65)", margin: 0 }}>Describe a scene, character, mood, or style — and watch it come to life</p>
+          <p style={{ fontSize: "clamp(13px,1.2vw,15px)", color: "rgba(255,255,255,0.65)", margin: 0 }}>Describe a scene, character, mood, or style to get started</p>
         </div>
       </div>
     </div>

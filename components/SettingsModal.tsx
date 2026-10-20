@@ -959,7 +959,7 @@ function ApiKeysPanel({
           API Keys
         </h2>
         <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.28)", marginTop: "6px", lineHeight: 1.5 }}>
-          Your Kie.ai key is stored securely on the server — it is never exposed to the browser.
+          Your API keys are stored securely on the server — they are never exposed to the browser.
         </p>
       </div>
 
@@ -988,7 +988,7 @@ function ApiKeysPanel({
           <div>
             <div style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.85)" }}>Kie.ai</div>
             <div style={{ fontSize: "10px", color: "rgba(255,255,255,0.28)", marginTop: "1px" }}>
-              Used for all image &amp; video generation
+              Image and video generation models
             </div>
           </div>
           {kieKeyStatus === "set" && (
@@ -1042,7 +1042,7 @@ function ApiKeysPanel({
             <div style={{ display: "flex", gap: "8px" }}>
               <input
                 type="password"
-                placeholder="Paste your Kie.ai API token"
+                placeholder="Paste your API token"
                 value={kieInput}
                 onChange={(e) => setKieInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleKieSave(); }}
@@ -1069,7 +1069,7 @@ function ApiKeysPanel({
               <p style={{ fontSize: "11px", color: "rgba(239,68,68,0.7)", margin: 0 }}>{kieError}</p>
             )}
             <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", margin: 0, lineHeight: 1.5 }}>
-              Get your token at{" "}
+              Get your API token at{" "}
               <a href="https://kie.ai/api-key" target="_blank" rel="noreferrer" style={{ color: "rgba(255,255,255,0.4)" }}>
                 kie.ai/api-key
               </a>

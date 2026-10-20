@@ -419,6 +419,138 @@ export const IMAGE_MODELS: ImageModel[] = [
       promptMaxLength: 3000,
     },
   },
+  {
+    // Sweep 2026-10-21: live on OpenRouter, single first-party endpoint.
+    // Kie apiId is a family-convention guess (UNVERIFIED) — OR is the
+    // intended path; kie selection may 404 loudly until confirmed.
+    id: "flux-3-image-klein",
+    apiId: "flux-3-klein/text-to-image",
+    textOnlyApiId: "flux-3-klein/text-to-image",
+    name: "Flux 3 Image Klein",
+    provider: "Flux",
+    ratios: ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+    supportsImages: true,
+    maxImages: 10,
+    supportsQuality: true,
+    apiInput: {
+      aspectRatioKey: "aspect_ratio",
+      imageInputKey: "image_urls",
+      qualityKey: "resolution",
+      qualityOptions: ["1k", "1.5k", "2k", "4k"],
+      promptMaxLength: 3000,
+    },
+  },
+  {
+    // Sweep 2026-10-21: kie serves the seedream family, so this follows the
+    // lite/pro convention — still confirm on first kie use. OR verified live.
+    id: "seedream-5-0-flash",
+    apiId: "seedream/5-flash-text-to-image",
+    textOnlyApiId: "seedream/5-flash-text-to-image",
+    name: "Seedream 5.0 Flash",
+    provider: "Seedream",
+    ratios: ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+    supportsImages: true,
+    maxImages: 14,
+    supportsQuality: true,
+    apiInput: {
+      aspectRatioKey: "aspect_ratio",
+      imageInputKey: "image_urls",
+      qualityKey: "resolution",
+      qualityOptions: ["1k", "2k"],
+      promptMaxLength: 3000,
+    },
+  },
+  {
+    // Sweep 2026-10-21: text-only on OpenRouter (endpoint declares no
+    // references field) — supportsImages false, no quality tiers.
+    // Kie apiId is a family-convention guess (UNVERIFIED).
+    id: "recraft-v4-1-flash",
+    apiId: "recraft/v4-1-flash/text-to-image",
+    textOnlyApiId: "recraft/v4-1-flash/text-to-image",
+    name: "Recraft V4.1 Flash",
+    provider: "Recraft",
+    ratios: ["auto", "1:1", "16:9", "9:16"],
+    supportsImages: false,
+    maxImages: 0,
+    supportsQuality: false,
+    apiInput: {
+      aspectRatioKey: "aspect_ratio",
+      promptMaxLength: 3000,
+    },
+  },
+  {
+    // Sweep 2026-10-21: token-metered on OpenRouter (no resolution tiers),
+    // refs 0-5. Kie apiId is a guess (UNVERIFIED) — OR is the intended path.
+    id: "mai-image-2-6-flash",
+    apiId: "mai-image-2-6-flash/text-to-image",
+    textOnlyApiId: "mai-image-2.6-flash/text-to-image",
+    name: "MAI Image 2.6 Flash",
+    provider: "Microsoft",
+    ratios: ["auto", "1:1", "16:9", "9:16", "4:3", "3:4"],
+    supportsImages: true,
+    maxImages: 5,
+    supportsQuality: false,
+    apiInput: {
+      aspectRatioKey: "aspect_ratio",
+      imageInputKey: "image_urls",
+      promptMaxLength: 3000,
+    },
+  },
+  {
+    // Sweep 2026-10-21: vector/stylized output; upstream REQUIRES at least
+    // one reference (min 1, max 10) — a text-only call will fail server-side.
+    // Kie apiId is a guess (UNVERIFIED).
+    id: "recraft-v4-styles-vector",
+    apiId: "recraft/v4-styles-vector/image-to-image",
+    textOnlyApiId: "recraft/v4-styles-vector/text-to-image",
+    name: "Recraft V4 Styles Vector",
+    provider: "Recraft",
+    ratios: ["auto", "1:1", "16:9", "9:16"],
+    supportsImages: true,
+    maxImages: 10,
+    supportsQuality: false,
+    apiInput: {
+      aspectRatioKey: "aspect_ratio",
+      imageInputKey: "image_urls",
+      promptMaxLength: 3000,
+    },
+  },
+  {
+    // Sweep 2026-10-21: single-tier (1K only) — no quality picker. Token-priced
+    // endpoint record carries no price; cost UNVERIFIED, confirm before bulk use.
+    // Kie apiId is a guess (UNVERIFIED).
+    id: "krea-2-medium-turbo",
+    apiId: "krea-2-medium-turbo/text-to-image",
+    textOnlyApiId: "krea-2-medium-turbo/text-to-image",
+    name: "Krea 2 Medium Turbo",
+    provider: "Krea",
+    ratios: ["auto", "1:1", "16:9", "9:16"],
+    supportsImages: true,
+    maxImages: 1,
+    supportsQuality: false,
+    apiInput: {
+      aspectRatioKey: "aspect_ratio",
+      imageInputKey: "image_urls",
+      promptMaxLength: 3000,
+    },
+  },
+  {
+    // Sweep 2026-10-21: as turbo but full model (see above — same caveats).
+    id: "krea-2-medium",
+    apiId: "krea-2-medium/text-to-image",
+    textOnlyApiId: "krea-2-medium/text-to-image",
+    name: "Krea 2 Medium",
+    provider: "Krea",
+    ratios: ["auto", "1:1", "16:9", "9:16"],
+    supportsImages: true,
+    maxImages: 1,
+    supportsQuality: false,
+    apiInput: {
+      aspectRatioKey: "aspect_ratio",
+      imageInputKey: "image_urls",
+      promptMaxLength: 3000,
+    },
+  },
 ];
 
 // ── Video models ──────────────────────────────────────────────────────────────

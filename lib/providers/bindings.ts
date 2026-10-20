@@ -597,6 +597,155 @@ const openRouterImageBindings: ModelProviderBinding[] = [
       referenceMode: "objects",
     },
   },
+
+  // Sweep 2026-10-21 — verified live via /api/v1/images/models/{id}/endpoints.
+  // Pricing captured 2026-10-21; re-check before bulk use (OpenRouter reprices).
+  // flux-3-image-klein → OR "black-forest-labs/flux-3-image-klein" ($0.008 768
+  // → $0.036 4K, size-scaled — the only per-size pricing in this batch).
+  {
+    modelId: "flux-3-image-klein",
+    providerId: "openrouter",
+    upstreamModelId: "black-forest-labs/flux-3-image-klein",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_IMAGE_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    paramMap: {
+      fields: { ...OR_IMAGE_FIELDS, resolution: "tier" },
+      valueMaps: {
+        resolution: { "1k": "1K", "1.5k": "1.5K", "2k": "2K", "4k": "4K" },
+        aspect_ratio: { auto: null },
+      },
+      maxReferences: 10,
+      referenceMode: "objects",
+    },
+  },
+
+  // seedream-5-0-flash → OR "bytedance-seed/seedream-5-0-flash" ($0.018 flat).
+  // Endpoint declares seed:boolean (same trap as qwen) — seed is NOT mapped,
+  // so it is never sent; the server default applies.
+  {
+    modelId: "seedream-5-0-flash",
+    providerId: "openrouter",
+    upstreamModelId: "bytedance-seed/seedream-5-0-flash",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_IMAGE_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    paramMap: {
+      fields: { ...OR_IMAGE_FIELDS, resolution: "tier" },
+      valueMaps: {
+        resolution: { "1k": "1K", "2k": "2K" },
+        aspect_ratio: { auto: null },
+      },
+      maxReferences: 14,
+      referenceMode: "objects",
+    },
+  },
+
+  // recraft-v4-1-flash → OR "recraft/recraft-v4.1-flash" ($0.007 flat).
+  // Text-only on OpenRouter (endpoint declares no references field);
+  // no resolution tiers either.
+  {
+    modelId: "recraft-v4-1-flash",
+    providerId: "openrouter",
+    upstreamModelId: "recraft/recraft-v4.1-flash",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_IMAGE_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    paramMap: {
+      fields: { ...OR_IMAGE_FIELDS, aspect_ratio: "aspectRatio" },
+      valueMaps: {
+        aspect_ratio: { auto: null },
+      },
+    },
+  },
+
+  // mai-image-2.6-flash → OR "microsoft/mai-image-2.6-flash" (token-metered:
+  // input text/image + output image tokens, NOT per-image). No resolution
+  // tiers; refs 0-5 per the endpoint record (shape unverified — objects per
+  // OR docs, confirm on first live use).
+  {
+    modelId: "mai-image-2.6-flash",
+    providerId: "openrouter",
+    upstreamModelId: "microsoft/mai-image-2.6-flash",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_IMAGE_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    paramMap: {
+      fields: { ...OR_IMAGE_FIELDS },
+      valueMaps: {
+        aspect_ratio: { auto: null },
+      },
+      maxReferences: 5,
+      referenceMode: "objects",
+    },
+  },
+
+  // recraft-v4-styles-vector → OR "recraft/recraft-v4-styles-vector"
+  // ($0.05/image + $0.005/input ref). Upstream REQUIRES ≥1 reference;
+  // a text-only call will fail server-side — the UI should steer users
+  // to attach one (max 10).
+  {
+    modelId: "recraft-v4-styles-vector",
+    providerId: "openrouter",
+    upstreamModelId: "recraft/recraft-v4-styles-vector",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_IMAGE_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    paramMap: {
+      fields: { ...OR_IMAGE_FIELDS },
+      valueMaps: {
+        aspect_ratio: { auto: null },
+      },
+      maxReferences: 10,
+      referenceMode: "objects",
+    },
+  },
+
+  // krea-2-medium-turbo → OR "krea/krea-2-medium-turbo". Single tier (1K),
+  // refs 0-1; endpoint declares seed:boolean — NOT mapped (same trap as
+  // qwen/seedream). WARNING: endpoint record carries no pricing — cost
+  // UNVERIFIED, confirm before bulk use.
+  {
+    modelId: "krea-2-medium-turbo",
+    providerId: "openrouter",
+    upstreamModelId: "krea/krea-2-medium-turbo",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_IMAGE_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    paramMap: {
+      fields: { ...OR_IMAGE_FIELDS },
+      valueMaps: {
+        aspect_ratio: { auto: null },
+      },
+      maxReferences: 1,
+      referenceMode: "objects",
+    },
+  },
+
+  // krea-2-medium → OR "krea/krea-2-medium" — as turbo; same caveats.
+  {
+    modelId: "krea-2-medium",
+    providerId: "openrouter",
+    upstreamModelId: "krea/krea-2-medium",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_IMAGE_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    paramMap: {
+      fields: { ...OR_IMAGE_FIELDS },
+      valueMaps: {
+        aspect_ratio: { auto: null },
+      },
+      maxReferences: 1,
+      referenceMode: "objects",
+    },
+  },
 ];
 
 // ── Pollinations image dialect (compat-plan §b; spike: .slim/binding-spike.md) ──

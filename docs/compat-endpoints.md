@@ -14,6 +14,7 @@ without a key (negative case). Record date + model used for each confirmation.
 | Backend | Base URL | Confirmed | Evidence |
 |---|---|---|---|
 | Pollinations sync image | `https://gen.pollinations.ai` | 2026-10-20 | Live: `POST /v1/images/generations` (z-image-turbo) → hosted media URL with `response_format:"url"`; ref field accepts BOTH `image:["data:..."]` array and single-string forms. |
+| OpenRouter images (qwen, recraft, seedream, flux families) | `https://openrouter.ai/api` | 2026-10-20/21 | Live: qwen-2.1-turbo t2i + i2v with refs (incl. the `aspect_ratio:"auto"` drop fix); recraft-v4.1-flash, seedream-5-0-flash, flux-3-image-klein spot-checks all `done` with mirrored files. Ref shape is `{type:"image_url",image_url:{url}}` objects (Zod rejects strings). `seed` is NUMERIC at runtime despite the endpoint listing claiming boolean. |
 
 ## Theoretically compatible (docs/schema-verified, NOT live-tested) 🔶
 

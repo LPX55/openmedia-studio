@@ -2,10 +2,16 @@
 import { useWorkflowStore } from "@/lib/store";
 
 export default function KieBanner() {
-  const kieKeySet = useWorkflowStore((s) => s.kieKeySet);
+  // Phase 5 (design §3.4): show only when NO generation provider is ready —
+  // not merely when Kie's key is missing (Kie is no longer the sole backend).
+  // Pre-hydration stays hidden, matching the old `kieKeySet !== false` null
+  // semantics, so a slow/failing settings fetch never flashes the banner.
+  const providerStatus = useWorkflowStore((s) => s.providerStatus);
+  const providersHydrated = useWorkflowStore((s) => s.providersHydrated);
   const setSettingsOpen = useWorkflowStore((s) => s.setSettingsOpen);
 
-  if (kieKeySet !== false) return null;
+  if (!providersHydrated) return null;
+  if (Object.values(providerStatus).some((p) => p.ready)) return null;
 
   return (
     <button
@@ -35,7 +41,7 @@ export default function KieBanner() {
         <line x1="12" y1="17" x2="12.01" y2="17" />
       </svg>
       <span style={{ fontSize: "12px", color: "rgba(239,68,68,0.9)", fontWeight: 500 }}>
-        No Kie.ai API key configured — generation is disabled.
+        No generation provider configured — add an API key in Settings.
       </span>
       <span style={{
         fontSize: "11px", fontWeight: 600, color: "rgba(239,68,68,0.7)",

@@ -129,7 +129,7 @@ export function insertGeneration(data: Omit<Generation, "id" | "created_at" | "u
 
 export function updateGeneration(
   taskId: string,
-  updates: Partial<Pick<Generation, "status" | "image_url" | "image_urls" | "video_url" | "error_msg">>,
+  updates: Partial<Pick<Generation, "status" | "image_url" | "image_urls" | "video_url" | "error_msg" | "provider_meta">>,
 ): void {
   const sets: string[] = ["updated_at = ?"];
   const vals: unknown[] = [now()];
@@ -138,6 +138,7 @@ export function updateGeneration(
   if ("image_urls" in updates) { sets.push("image_urls = ?"); vals.push(updates.image_urls ? JSON.stringify(updates.image_urls) : null); }
   if ("video_url" in updates) { sets.push("video_url = ?"); vals.push(updates.video_url ?? null); }
   if ("error_msg" in updates) { sets.push("error_msg = ?"); vals.push(updates.error_msg ?? null); }
+  if ("provider_meta" in updates) { sets.push("provider_meta = ?"); vals.push(updates.provider_meta ? JSON.stringify(updates.provider_meta) : null); }
   vals.push(taskId);
   db().prepare(`UPDATE generations SET ${sets.join(", ")} WHERE task_id = ?`).run(...(vals as never[]));
 }
@@ -412,6 +413,43 @@ export function getModelBindingsByModel(): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   for (const r of rows) (out[r.model_id] ??= []).push(r.provider_id);
   return out;
+}
+
+/** P4b: shape-compatible with `ModelBindingRowLike` (lib/providers/registry.ts). */
+export interface ModelBindingRowData {
+  modelId: string;
+  providerId: string;
+  /** Parsed `binding_json` — null when the row is a pure active-provider preference. */
+  binding: Record<string, unknown> | null;
+  isActive: boolean;
+  isCustom: boolean;
+}
+
+/**
+ * All `model_bindings` rows for one model — passed to
+ * `registry.resolveForModel(modelId, explicitProviderId?, rows)` by the
+ * generation controllers (the registry itself performs no queries).
+ */
+export function getModelBindingRows(modelId: string): ModelBindingRowData[] {
+  const rows = db()
+    .prepare("SELECT * FROM model_bindings WHERE model_id = ?")
+    .all(modelId) as unknown as ModelBindingRow[];
+  return rows.map((r) => {
+    let binding: Record<string, unknown> | null = null;
+    if (r.binding_json) {
+      try {
+        const parsed = JSON.parse(r.binding_json) as unknown;
+        if (parsed && typeof parsed === "object") binding = parsed as Record<string, unknown>;
+      } catch { /* malformed — treat as no override */ }
+    }
+    return {
+      modelId: r.model_id,
+      providerId: r.provider_id,
+      binding,
+      isActive: r.is_active === 1,
+      isCustom: r.is_custom === 1,
+    };
+  });
 }
 
 /** Transactionally clears sibling active flags, then marks (modelId, providerId) active. */

@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useWorkflowStore } from "@/lib/store";
+import { refreshProviderBootstrap } from "@/lib/providers";
 import { useChatSessionStore } from "@/lib/chatSessionStore";
 import { useFolderStore } from "@/lib/folderStore";
 import {
@@ -672,30 +673,24 @@ export function AppSidebar() {
 
   const [balance, setBalance] = React.useState<number | null>(null);
 
-  const setSettingsOpen   = useWorkflowStore((s) => s.setSettingsOpen);
-  const setKieKeySet      = useWorkflowStore((s) => s.setKieKeySet);
-  const setAzureKeySet    = useWorkflowStore((s) => s.setAzureKeySet);
+  const setSettingsOpen = useWorkflowStore((s) => s.setSettingsOpen);
 
+  // Phase 5 (design §3.4) — hydrate provider readiness + prefs from the
+  // unified bootstrap (GET /api/settings/providers). kieKeySet/azureKeySet
+  // are derived from it inside setProviderBootstrap for chat compat; the
+  // legacy /api/settings/kie-key + /api/settings/azure-key fetches are gone.
   React.useEffect(() => {
-    fetch("/api/settings/kie-key")
-      .then((r) => r.json())
-      .then((d) => setKieKeySet(!!d.hasToken))
-      .catch(() => setKieKeySet(null));
-    fetch("/api/settings/azure-key")
-      .then((r) => r.json())
-      .then((d) => setAzureKeySet(!!d.hasToken))
-      .catch(() => setAzureKeySet(null));
-  }, [setKieKeySet, setAzureKeySet]);
+    void refreshProviderBootstrap();
+  }, []);
 
   // Phase 3 (C7d / O5-B1) — one-time POPULATE-ONLY migration of legacy localStorage
   // provider config into /api/settings/providers. The three keys are NEVER deleted
-  // here: the client still reads them as its live source of truth (lib/providers.ts,
-  // GenerateNode, gallery, SettingsModal) and nothing consumes GET yet — the delete
-  // plus the design's "migrated" marker (aiui-provider-config-migrated) land together
-  // with the Phase 4+5 rewire. This distinct "uploaded" marker only stops the POST
-  // repeating. The marker is written ONLY when every key that exists was parsed and
-  // included: a failed parse keeps the key AND skips the marker, so the POST retries
-  // next load (no stranding).
+  // here (P5 scope 9: populate-only stays): they are now inert — no client code
+  // reads `aiui-azure-base-url` / `aiui-azure-endpoints` / `aiui-model-providers`
+  // anymore (lib/providers.ts rewired to the store). This distinct "uploaded"
+  // marker only stops the POST repeating. The marker is written ONLY when every
+  // key that exists was parsed and included: a failed parse keeps the key AND
+  // skips the marker, so the POST retries next load (no stranding).
   React.useEffect(() => {
     const UPLOADED_KEY = "aiui-providers-uploaded-v1";
     try {

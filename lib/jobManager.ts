@@ -1,26 +1,37 @@
 /**
- * lib/jobManager — provider-refactor Phase 2 (design.md §2; C2/C3/C7b-minimal).
+ * lib/jobManager — provider-refactor Phase 2 + Phase 4 (design.md §2).
  *
  * - `settleJob()` is the single completion funnel for in-process jobs: mirror
  *   media into MEDIA_DIR, write `jobStore`, update the `generations` row, emit
  *   `job:<taskId>` on the SSE bus (fixes the Azure/Codex 12-min hang), and
  *   release both in-process registries (C2: settleJob is the only release point).
- * - `activeSubmits` (C2): the generate route registers a live in-process submit
- *   before invoking the provider; `resumeJob` therefore can no longer false-kill
- *   a live Azure/Codex job on the client's very first status poll.
- * - `resumeJob()`: crash recovery — restarts a lost kie poll loop, settles an
- *   orphaned in-process job ("Server restarted…"), leaves unknown providers
- *   untouched.
- *
- * Phase-2 scope is the C7b *minimal* option: no provider registry yet —
- * resumeJob handles "kie" and the in-process "azure"/"codex" directly.
+ * - `submitJob()` (P4b, design §2.1): uniform PRE-MINT — mints the taskId,
+ *   inserts the pending `jobStore` + `generations` rows (with `provider_id`)
+ *   BEFORE any upstream call, marks the submit live (C2 `activeSubmits`),
+ *   runs `provider.submit()` in a managed try/catch background task (a throw
+ *   settles the row `error` — finding 3b), and returns `{ taskId }`
+ *   immediately. Sync outcomes settle inline; async outcomes persist
+ *   `provider_meta` (C3) and arm the provider-generic poll loop.
+ * - `startPolling()` (P4b): generic 3s/12-min loop calling
+ *   `provider.poll(upstreamTaskId, kind, cfg, meta)` through the registry
+ *   (replaces the Phase-2 kieJobPoller shim). The Kie-Veo family is the one
+ *   UNPOLLED family (C4 spike fallback — see the guard below).
+ * - `resumeJob()`: crash recovery — restarts a lost poll loop via the
+ *   registered provider, settles an orphaned in-process job ("Server
+ *   restarted…"), leaves unknown providers untouched.
  */
 import { randomUUID } from "crypto";
 import { jobStore, type JobResult, type ProviderMeta } from "./jobStore";
 import { jobEvents } from "./jobEvents";
 import { mirrorToR2, uploadBuffer } from "./storage";
 import * as guestDb from "./guest/db";
-import { runKiePollLoop, isPolling as isKiePolling } from "./kieJobPoller";
+import { GUEST_USER_ID } from "./guestMode";
+// Importing the bootstrap for its side effect (registers kie/azure/codex) AND
+// for `get` — controllers never import adapters directly (P4b). NB: `./providers`
+// would resolve to the client-side lib/providers.ts; the bootstrap is ./providers/bootstrap.
+import { get as getRegisteredProvider } from "./providers/bootstrap";
+import type { GenerationProvider, GenerateInput, StagedMedia } from "./providers/types";
+import type { ModelProviderBinding } from "./providers/bindings";
 
 export type JobKind = "image" | "video";
 
@@ -34,6 +45,11 @@ const activeSubmits = new Map<string, string>();
 const activePollers = new Set<string>();
 
 const RESTART_ERROR = "Server restarted while local job was in progress";
+
+const POLL_INTERVAL_MS = 3_000;
+const MAX_POLL_MS = 12 * 60 * 1000; // matches the SSE hard cap in job-status
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** True when the task is a live submit of this boot or has a live poll loop (C2). */
 export function isActive(taskId: string): boolean {
@@ -121,23 +137,194 @@ export async function settleJob(
 }
 
 /**
- * Start (or restart) the async poll loop for a task. The 3s-interval /
- * 12-min-cap loop itself lives in lib/kieJobPoller and is reused unchanged via
- * runKiePollLoop. kie-only in Phase 2: azure/codex are in-process and have
- * nothing to poll (C7b minimal shims — no registry yet).
+ * Generic poll loop (P4b): 3s interval, 12-min deadline, one `provider.poll()`
+ * tick per interval — the loop shape kieJobPoller.ts used, now driven through
+ * the registry adapter. Always terminal: the deadline settles the job.
+ */
+async function runProviderPollLoop(
+  provider: GenerationProvider,
+  taskId: string,
+  upstreamTaskId: string,
+  kind: JobKind,
+  meta?: ProviderMeta,
+): Promise<void> {
+  const cfg = guestDb.getProviderRuntimeConfig(String(provider.id));
+  const deadline = Date.now() + MAX_POLL_MS;
+
+  while (Date.now() < deadline) {
+    await sleep(POLL_INTERVAL_MS);
+
+    let outcome;
+    try {
+      outcome = await provider.poll!(upstreamTaskId, kind, cfg, meta);
+    } catch (e) {
+      // Transient poll errors retry — same contract as the old kie loop.
+      console.warn(`[jobManager] ${taskId} transient poll error:`, (e as Error).message);
+      continue;
+    }
+
+    if (outcome.state === "done") {
+      await settleJob(taskId, kind, String(provider.id), {
+        status: "done",
+        urls: outcome.mediaUrls,
+        buffers: outcome.buffers,
+      });
+      return;
+    }
+    if (outcome.state === "error") {
+      await settleJob(taskId, kind, String(provider.id), { status: "error", error: outcome.error });
+      return;
+    }
+    // pending → keep polling
+  }
+
+  await settleJob(taskId, kind, String(provider.id), { status: "error", error: "Generation timed out" });
+}
+
+/**
+ * Start (or restart) the async poll loop for a task via the registered
+ * provider's `poll()`. No-ops when the provider has no poll implementation —
+ * including the Kie-Veo family, which is the one UNPOLLED family until the
+ * C4 record-info spike verifies the endpoint (design §2.3; the adapter parks
+ * that family as `pending`, and we don't even arm the loop here so an unpolled
+ * Veo row can still be resumed/settled by other means).
  */
 export function startPolling(taskId: string, providerId: string, kind: JobKind, meta?: ProviderMeta): void {
   if (!taskId || activePollers.has(taskId)) return;
-  if (providerId !== "kie") return;
-  const upstreamTaskId = meta?.upstreamTaskId ?? taskId;
-  if (isKiePolling(upstreamTaskId)) return; // a poll loop already owns this upstream task
-  const apiKey = guestDb.getKieApiToken();
-  if (!apiKey) return; // same no-op as resumeKieJob when no key is configured
+  if (meta?.family === "kie-google-veo") return; // C4 spike fallback — unpolled family
+  const provider = getRegisteredProvider(providerId);
+  if (!provider?.poll) return;
 
+  const upstreamTaskId = meta?.upstreamTaskId ?? taskId;
   activePollers.add(taskId);
-  void runKiePollLoop(upstreamTaskId, apiKey, kind)
-    .catch((e) => console.error(`[jobManager] kie poll for ${taskId} crashed:`, e))
+  void runProviderPollLoop(provider, taskId, upstreamTaskId, kind, meta)
+    .catch((e) => console.error(`[jobManager] poll for ${taskId} crashed:`, e))
     .finally(() => activePollers.delete(taskId));
+}
+
+/** Flatten staged media into the pending row's `reference_image_urls` (display metadata). */
+function flattenStagedMedia(media: GenerateInput["media"]): string[] | undefined {
+  const out: string[] = [];
+  const push = (s?: StagedMedia) => {
+    const u = s?.url ?? s?.originalUrl;
+    if (u) out.push(u);
+  };
+  media.references?.forEach(push);
+  push(media.startFrame);
+  push(media.endFrame);
+  push(media.videoRef);
+  media.referenceVideos?.forEach(push);
+  media.audioRefs?.forEach(push);
+  media.resources?.forEach((r) => push(r.media));
+  return out.length > 0 ? out : undefined;
+}
+
+/**
+ * Uniform pre-mint submit (design §2.1, P4b):
+ *   mint taskId → insert pending rows (jobStore + generations, with
+ *   provider_id) → registerSubmit (C2) → managed background
+ *   `provider.submit()` → settleJob (sync) / provider_meta + poll loop (async).
+ * Returns `{ taskId }` immediately; a throwing submit settles the row
+ * `error` (finding 3b) instead of leaving it pending forever.
+ */
+export async function submitJob(
+  kind: JobKind,
+  provider: GenerationProvider,
+  binding: ModelProviderBinding,
+  input: Omit<GenerateInput, "taskId" | "kind" | "binding" | "credentials">,
+): Promise<{ taskId: string }> {
+  const providerId = String(provider.id);
+  const taskId = `${providerId}-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const fullInput: GenerateInput = {
+    ...input,
+    taskId,
+    kind,
+    binding,
+    credentials: guestDb.getProviderRuntimeConfig(providerId),
+  };
+
+  jobStore.set(taskId, {
+    status: "pending",
+    type: kind,
+    userId: GUEST_USER_ID ?? undefined,
+    providerId,
+  });
+
+  // Pre-insert the pending row BEFORE the upstream call (design §2.1) so a
+  // crash mid-submit can't orphan the job; settleJob updates it on completion.
+  guestDb.insertGeneration({
+    task_id: taskId,
+    user_id: GUEST_USER_ID,
+    generation_type: kind,
+    status: "pending",
+    prompt: input.prompt.slice(0, 2000),
+    model: input.model.id,
+    aspect_ratio: input.params.aspectRatio,
+    quality: input.params.quality,
+    ...(kind === "image" ? { azure_resolution: providerId === "azure" ? input.params.resolution : undefined } : {}),
+    duration: input.params.duration,
+    kling_mode: input.params.mode,
+    sound: input.params.sound,
+    reference_image_urls: flattenStagedMedia(input.media),
+    provider_id: providerId,
+  });
+
+  // C2: mark the submit live — released ONLY when settleJob runs, so the
+  // client's first status poll can't false-kill a job that's still running.
+  registerSubmit(taskId);
+
+  void (async () => {
+    try {
+      const outcome = await provider.submit(fullInput);
+
+      if (outcome.mode === "sync") {
+        await settleJob(taskId, kind, providerId, {
+          status: "done",
+          urls: outcome.mediaUrls,
+          buffers: outcome.rawBuffers,
+        });
+        return;
+      }
+
+      // Async upstream task — persist the C3-pinned provider_meta so
+      // resumeJob/poll can reconnect after a restart.
+      const meta: ProviderMeta = outcome.providerMeta ?? {
+        upstreamTaskId: outcome.upstreamTaskId,
+        family: binding.family ?? "standard",
+        statusUrl: "",
+        upstreamModelId: binding.upstreamModelId,
+      };
+      jobStore.set(taskId, {
+        status: "pending",
+        type: kind,
+        userId: GUEST_USER_ID ?? undefined,
+        providerId,
+        providerMeta: meta,
+      });
+      guestDb.updateGeneration(taskId, { provider_meta: meta });
+
+      if (meta.family === "kie-google-veo") {
+        // C4 spike fallback: Veo is the one unpolled family (the record-info
+        // endpoint/shape is unverified), and no poll loop will ever own this
+        // task. Settle it EXPLICITLY (o6 bullet 5) — leaving it pending would
+        // hang the client forever; HEAD's 12-min poll timeout used to produce
+        // the same terminal error. settleJob's finally releases activeSubmits.
+        await settleJob(taskId, kind, providerId, {
+          status: "error",
+          error: "Veo polling not available — the result can't be tracked yet; check the Gallery later.",
+        });
+        return;
+      }
+
+      startPolling(taskId, providerId, kind, meta);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[jobManager] ${providerId} submit for ${taskId} failed:`, msg);
+      await settleJob(taskId, kind, providerId, { status: "error", error: msg });
+    }
+  })();
+
+  return { taskId };
 }
 
 /**
@@ -152,7 +339,6 @@ export function startPolling(taskId: string, providerId: string, kind: JobKind, 
 export function resumeJob(taskId: string): void {
   if (!taskId) return;
   if (isActive(taskId)) return;   // live submit (current boot) or live poll — C2
-  if (isKiePolling(taskId)) return; // the submit-path kie loop owns this task
 
   const stored = jobStore.get(taskId);
   if (stored && stored.status !== "pending") return; // already settled
@@ -196,5 +382,5 @@ export function resumeJob(taskId: string): void {
     void settleJob(taskId, jobKind, providerId, { status: "error", error: RESTART_ERROR });
     return;
   }
-  // Unknown provider for this phase (no registry yet, C7b minimal) — leave pending untouched.
+  // Unknown provider (no adapter registered) — leave pending untouched.
 }

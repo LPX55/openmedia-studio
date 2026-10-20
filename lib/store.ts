@@ -147,6 +147,21 @@ export interface Toast {
   preview?: string;
 }
 
+/**
+ * One provider's non-secret readiness (GET /api/settings/providers →
+ * `providers[id]`, design §3.3). `hasKey` doubles as the chat-compat
+ * kieKeySet/azureKeySet source (§3.4).
+ */
+export interface ProviderStatusEntry {
+  hasKey:    boolean;
+  ready:     boolean;
+  deployments: Record<string, string>;
+  baseUrl?:  string | null;
+  keySource?: string;
+}
+
+export type ProviderStatusMap = Record<string, ProviderStatusEntry>;
+
 interface WorkflowStore {
   // ── Toasts
   toasts:      Toast[];
@@ -160,6 +175,24 @@ interface WorkflowStore {
   // ── Azure key status (null = unknown, true = set, false = not set)
   azureKeySet:    boolean | null;
   setAzureKeySet: (v: boolean | null) => void;
+
+  // ── Provider readiness bootstrap (Phase 5, design §3.4) — hydrated from
+  //    GET /api/settings/providers by AppSidebar; NOT persisted (server-authoritative).
+  providerStatus:    ProviderStatusMap;
+  modelProviders:    Record<string, string>;   // modelId → active providerId (modelPrefs)
+  bindingsByModel:   Record<string, string[]>; // C8 union: static bindings ∪ rows
+  providersHydrated: boolean;
+  setProviderBootstrap: (payload: {
+    providers?: Record<string, {
+      hasKey?: boolean;
+      ready?: boolean;
+      deployments?: Record<string, string>;
+      baseUrl?: string | null;
+      keySource?: string;
+    }>;
+    modelPrefs?: Record<string, string>;
+    bindingsByModel?: Record<string, string[]>;
+  }) => void;
 
   // ── Spaces
   spaces:        Space[];
@@ -700,6 +733,35 @@ export const useWorkflowStore = create<WorkflowStore>()(
 
         azureKeySet:    null,
         setAzureKeySet: (v) => set({ azureKeySet: v }),
+
+        // Phase 5 (design §3.4): server-authoritative provider readiness.
+        providerStatus:    {},
+        modelProviders:    {},
+        bindingsByModel:   {},
+        providersHydrated: false,
+        setProviderBootstrap: (payload) =>
+          set(() => {
+            const providerStatus: ProviderStatusMap = {};
+            for (const [id, p] of Object.entries(payload.providers ?? {})) {
+              providerStatus[id] = {
+                hasKey:      !!p.hasKey,
+                ready:       !!p.ready,
+                deployments: p.deployments ?? {},
+                baseUrl:     p.baseUrl ?? null,
+                keySource:   p.keySource,
+              };
+            }
+            return {
+              providerStatus,
+              modelProviders:    payload.modelPrefs    ?? {},
+              bindingsByModel:   payload.bindingsByModel ?? {},
+              providersHydrated: true,
+              // Chat compatibility (§3.4): the legacy key flags are DERIVED
+              // from the same bootstrap instead of the kie-key/azure-key routes.
+              kieKeySet:   payload.providers?.kie   ? !!payload.providers.kie.hasKey   : null,
+              azureKeySet: payload.providers?.azure ? !!payload.providers.azure.hasKey : null,
+            };
+          }),
 
         settingsOpen:              false,
         setSettingsOpen:           (v) => set({ settingsOpen: v }),

@@ -13,6 +13,7 @@ import {
   deleteProviderModelBindings,
 } from "@/lib/guest/db";
 import { IMAGE_MODELS, VIDEO_MODELS } from "@/lib/modelConfig";
+import { getAvailableProvidersForModel } from "@/lib/providers/bindings";
 
 /**
  * Phase 3 — unified provider credential/config store (design.md §3.3).
@@ -76,14 +77,17 @@ export async function GET() {
     };
   }
 
-  // C8 per-model provider union: the C1 static default (every catalog model
-  // runs on Kie) plus any stored model_bindings rows. The client renders the
-  // provider selector at >=2 from this; the static binding set itself lives in
-  // lib/providers/bindings.ts (Phase 4), not here.
+  // C3 (o6-gate): bindingsByModel is the UNION of the static binding set
+  // (lib/providers/bindings.ts — e.g. gpt-image-2 → kie+azure+codex) and any
+  // stored model_bindings rows, so the P5 provider selector sees every
+  // provider a model can actually run on. Rows only ever ADD to the static
+  // set; the static set itself is code, not rows (bindings.ts hedge (d)).
   const rowsByModel = getModelBindingsByModel();
   const bindingsByModel: Record<string, string[]> = {};
   for (const m of [...IMAGE_MODELS, ...VIDEO_MODELS]) {
-    bindingsByModel[m.id] = ["kie", ...((rowsByModel[m.id] ?? []).filter((p) => p !== "kie"))];
+    bindingsByModel[m.id] = [
+      ...new Set([...getAvailableProvidersForModel(m.id), ...(rowsByModel[m.id] ?? [])]),
+    ];
   }
   for (const [modelId, pids] of Object.entries(rowsByModel)) {
     if (!bindingsByModel[modelId]) bindingsByModel[modelId] = pids;

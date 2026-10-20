@@ -3,7 +3,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { IMAGE_MODELS, VIDEO_MODELS } from "@/lib/modelConfig";
 import { MODEL_GROUPS } from "@/lib/models";
 import { useWorkflowStore } from "@/lib/store";
-import { PROVIDERS, ProviderId, loadModelProviders, saveModelProviders, getModelProvider } from "@/lib/providers";
+import { PROVIDERS, ProviderId, loadModelProviders, saveModelProviders, getModelProvider, getAzureDeployments, getAzureBaseUrl, refreshProviderBootstrap, availableProvidersForModel } from "@/lib/providers";
+import { ProviderBrandIcon } from "@/components/ui/ProviderIcon";
 
 /* ─── Provider options (re-exported for backwards compat) ───────────────────── */
 
@@ -17,45 +18,55 @@ export type CodexStatus =
 
 /* ─── Persistence ───────────────────────────────────────────────────────────── */
 
-const AZURE_DEPLOYS_KEY      = "aiui-azure-endpoints";       // per-model deployment names
-const AZURE_BASE_KEY         = "aiui-azure-base-url";        // global Foundry base URL
+// Phase 5 (C2/C8, design §3.3-§3.4): the Azure base URL + per-model deployment
+// map are SERVER-AUTHORITATIVE (provider_configs via PUT /api/settings/providers).
+// The legacy localStorage keys (`aiui-azure-base-url` / `aiui-azure-endpoints`)
+// are gone; these loaders keep their old names for chat/QuickAssist, now
+// reading the store that GET /api/settings/providers hydrates.
 const AZURE_TEXT_DEPLOY_KEY  = "aiui-azure-text-deployment"; // text model deployment (URL path)
 const AZURE_TEXT_MODEL_KEY   = "aiui-azure-text-model";      // text model name (request body)
 
 /** Per-model deployment name map (e.g. { "gpt-image-2": "gpt-image-2" }). */
 export function loadAzureEndpoints(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(AZURE_DEPLOYS_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  return getAzureDeployments();
 }
 
 export function saveAzureEndpoints(map: Record<string, string>) {
-  try {
-    localStorage.setItem(AZURE_DEPLOYS_KEY, JSON.stringify(map));
-  } catch { /* noop */ }
+  scheduleAzurePut({ deployments: map });
 }
 
 /** Returns the deployment name for a given model, or "" if unset. */
 export function getAzureDeployment(modelId: string): string {
-  return loadAzureEndpoints()[modelId] ?? "";
+  return getAzureDeployments()[modelId] ?? "";
 }
 
-/** Global Azure Cognitive Services base URL (shared across all models). */
+/** Global Azure Foundry base URL (shared across all models). */
 export function loadAzureBaseUrl(): string {
-  try {
-    return localStorage.getItem(AZURE_BASE_KEY) ?? "";
-  } catch {
-    return "";
-  }
+  return getAzureBaseUrl();
 }
 
 export function saveAzureBaseUrl(url: string) {
-  try {
-    localStorage.setItem(AZURE_BASE_KEY, url);
-  } catch { /* noop */ }
+  scheduleAzurePut({ baseUrl: url });
+}
+
+/** Debounced PUT-through (the base-URL/deployment editors are per-keystroke). */
+let azurePutTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleAzurePut(body: { baseUrl?: string; deployments?: Record<string, string> }) {
+  if (azurePutTimer) clearTimeout(azurePutTimer);
+  azurePutTimer = setTimeout(() => {
+    azurePutTimer = null;
+    void (async () => {
+      try {
+        await fetch("/api/settings/providers", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ providerId: "azure", ...body }),
+        });
+        // Re-hydrate so readiness gates + the editors see the new value.
+        await refreshProviderBootstrap();
+      } catch { /* offline — local editor state keeps the draft */ }
+    })();
+  }, 400);
 }
 
 /** @deprecated renamed — use getAzureDeployment(). Kept for backwards compat. */
@@ -162,43 +173,19 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-/* ─── Provider brand icons (kie/azure/codex backend pills) ───────────────────── */
-
-function ProviderBrandIcon({ id, size = 12 }: { id: ProviderId; size?: number }) {
-  if (id === "kie") {
-    return (
-      <span className="text-[#2DD4BF] shrink-0" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.83)}px`, fontWeight: 700 }}>
-        K
-      </span>
-    );
-  }
-  if (id === "codex") {
-    return (
-      <svg className="text-[#2DD4BF] shrink-0" width={size} height={size} viewBox="0 0 24 24" fill="currentColor" fillRule="evenodd">
-        <path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z" />
-      </svg>
-    );
-  }
-  if (id === "azure") {
-    return (
-      <svg className="shrink-0" width={size} height={size} viewBox="0 0 256 199">
-        <path d="M118.432 187.698c32.89-5.81 60.055-10.618 60.367-10.684l.568-.12l-31.052-36.935c-17.078-20.314-31.051-37.014-31.051-37.11c0-.182 32.063-88.477 32.243-88.792c.06-.105 21.88 37.567 52.893 91.32c29.035 50.323 52.973 91.815 53.195 92.203l.405.707l-98.684-.012l-98.684-.013l59.8-10.564zM0 176.435c0-.052 14.631-25.451 32.514-56.442l32.514-56.347l37.891-31.799C123.76 14.358 140.867.027 140.935.001c.069-.026-.205.664-.609 1.534s-18.919 40.582-41.145 88.25l-40.41 86.67l-29.386.037c-16.162.02-29.385-.005-29.385-.057z" fill="#0089D6" fillRule="nonzero" />
-      </svg>
-    );
-  }
-  return null;
-}
-
 /* ─── Toggle ─────────────────────────────────────────────────────────────────── */
 
 function ProviderToggle({
   modelId,
   value,
   onChange,
+  providers,
 }: {
   modelId: string;
   value: ProviderId;
   onChange: (v: ProviderId) => void;
+  /** The model's provider union from GET bindingsByModel (falls back to all three pre-hydration). */
+  providers: ProviderId[];
 }) {
   return (
     <div
@@ -213,7 +200,8 @@ function ProviderToggle({
         flexShrink: 0,
       }}
     >
-      {PROVIDERS.map((p) => {
+      {(providers.length >= 2 ? providers : PROVIDERS).map((id) => {
+        const p = PROVIDERS.find((q) => q.id === id)!;
         const active = value === p.id;
         return (
           <button
@@ -255,7 +243,7 @@ function ModelRow({
   category,
   value,
   onChange,
-  azureSupported,
+  choices,
 }: {
   id: string;
   name: string;
@@ -263,7 +251,8 @@ function ModelRow({
   category: string;
   value: ProviderId;
   onChange: (v: ProviderId) => void;
-  azureSupported: boolean;
+  /** Providers this model can run on — toggle only when ≥2 (any image OR video model). */
+  choices: ProviderId[];
 }) {
   return (
     <div
@@ -303,8 +292,8 @@ function ModelRow({
         </div>
       </div>
 
-      {/* Provider toggle — only shown for models with more than one backend to choose from */}
-      {azureSupported && <ProviderToggle modelId={id} value={value} onChange={onChange} />}
+      {/* Provider toggle — any model (image OR video) with ≥2 bound backends (P5 C7) */}
+      {choices.length >= 2 && <ProviderToggle modelId={id} value={value} onChange={onChange} providers={choices} />}
     </div>
   );
 }
@@ -328,6 +317,10 @@ function ModelGroup({
   azureDeployments: Record<string, string>;
   onDeploymentChange: (modelId: string, v: string) => void;
 }) {
+  // P5 C7: the toggle set comes from the server's per-model provider union
+  // (bindingsByModel); availableProvidersForModel() falls back to the static
+  // set pre-hydration. The subscription makes the row re-render when GET lands.
+  useWorkflowStore((s) => s.bindingsByModel);
   return (
     <div>
       {/* Group header */}
@@ -349,7 +342,7 @@ function ModelGroup({
               category={m.category}
               value={providers[m.id] ?? "kie"}
               onChange={(v) => onProviderChange(m.id, v)}
-              azureSupported={!!m.hasAzureDeployment}
+              choices={availableProvidersForModel(m.id)}
             />
             {/* Deployment name — shown only for Azure-capable models when Azure is selected */}
             {m.hasAzureDeployment && (providers[m.id] ?? "kie") === "azure" && (
@@ -1362,9 +1355,14 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
 
   /* Load persisted data on mount */
   useEffect(() => {
-    setModelProviders(loadModelProviders());
-    setAzureDeployments(loadAzureEndpoints());
-    setAzureBaseUrl(loadAzureBaseUrl());
+    // Re-hydrate the store bootstrap first so the loaders below (and the
+    // readiness gates elsewhere) see fresh server state, then mirror it into
+    // the local editor copies.
+    void refreshProviderBootstrap().then(() => {
+      setModelProviders(loadModelProviders());
+      setAzureDeployments(loadAzureEndpoints());
+      setAzureBaseUrl(loadAzureBaseUrl());
+    });
     setAzureTextDeployment(loadAzureTextDeployment());
     setAzureTextModelName(loadAzureTextModelName());
     // Check if Kie key is saved on the server
@@ -1426,6 +1424,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     if (!res.ok) throw new Error((await res.json()).error ?? "Failed to save");
     setKieKeyStatus("set");
     setKieKeySet(true);
+    void refreshProviderBootstrap(); // readiness gates re-evaluate
   };
 
   const handleKieKeyDelete = async () => {
@@ -1433,6 +1432,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     await fetch("/api/settings/kie-key", { method: "DELETE", headers: h });
     setKieKeyStatus("unset");
     setKieKeySet(false);
+    void refreshProviderBootstrap();
   };
 
   const handleAzureKeySave = async (key: string) => {
@@ -1445,6 +1445,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     if (!res.ok) throw new Error((await res.json()).error ?? "Failed to save");
     setAzureKeyStatus("set");
     setAzureKeySet(true);
+    void refreshProviderBootstrap();
   };
 
   const handleAzureKeyDelete = async () => {
@@ -1452,6 +1453,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     await fetch("/api/settings/azure-key", { method: "DELETE", headers: h });
     setAzureKeyStatus("unset");
     setAzureKeySet(false);
+    void refreshProviderBootstrap();
   };
 
   const handleAzureTextDeploymentChange = (v: string) => {

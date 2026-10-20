@@ -48,6 +48,16 @@ function isLocalMedia(url: string): boolean {
 async function toDataUrl(input: string): Promise<string> {
   if (input.startsWith("data:")) return input;
 
+  // Loopback/private URL (o6 bullet 5): upstream can't fetch it, but this
+  // server can — re-host the bytes by fetching here.
+  if (/^https?:\/\//i.test(input)) {
+    const res = await fetch(input);
+    if (!res.ok) throw new Error(`local fetch for kie upload failed (${res.status}): ${input}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const mime = res.headers.get("content-type")?.split(";")[0]?.trim() || "application/octet-stream";
+    return `data:${mime};base64,${buf.toString("base64")}`;
+  }
+
   const rel = input.replace(/^\/generated\//, "").replace(/^\/+/, "");
   const buf = await readFile(join(MEDIA_DIR, rel));
   const ext = rel.split(".").pop()?.toLowerCase() ?? "";

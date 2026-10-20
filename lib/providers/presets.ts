@@ -201,9 +201,11 @@ export function parseParamPresetParams(presetId: string, json: string): ParamPre
         throw new Error(`param preset "${presetId}": valueMap "${bodyKey}" must be an object`);
       }
       for (const [from, to] of Object.entries(map)) {
-        if (typeof to !== "string") {
+        // null means DROP the field (catalog sentinels like "auto" that an
+        // endpoint enum rejects); anything else must be a string.
+        if (to !== null && typeof to !== "string") {
           throw new Error(
-            `param preset "${presetId}": valueMap "${bodyKey}.${from}" must be a string`,
+            `param preset "${presetId}": valueMap "${bodyKey}.${from}" must be a string or null (null drops the field)`,
           );
         }
       }

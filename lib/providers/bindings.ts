@@ -91,7 +91,7 @@ export type CompatFieldSource =
  */
 export type CompatParamMap = {
   fields?: Record<string, CompatFieldSource>;
-  valueMaps?: Record<string, Record<string, string>>;
+  valueMaps?: Record<string, Record<string, string | null>>;
   constants?: Record<string, string>;
   modelKey?: string;
   maxReferences?: number;
@@ -425,7 +425,12 @@ const openRouterImageBindings: ModelProviderBinding[] = [
     keyEnv: OPENROUTER_KEY_ENV,
     paramMap: {
       fields: { ...OR_IMAGE_FIELDS, resolution: "tier" },
-      valueMaps: { resolution: { "1k": "1K", "2k": "2K" } },
+      valueMaps: {
+        resolution: { "1k": "1K", "2k": "2K" },
+        // "auto" is not in the endpoint enum — drop it and let the server
+        // default (verified live: the router 400s "auto" outright).
+        aspect_ratio: { auto: null },
+      },
       maxReferences: 14,
       referenceMode: "objects",
     },
@@ -448,7 +453,12 @@ const openRouterImageBindings: ModelProviderBinding[] = [
     keyEnv: OPENROUTER_KEY_ENV,
     paramMap: {
       fields: { ...OR_IMAGE_FIELDS, resolution: "tier" },
-      valueMaps: { resolution: { "1k": "1K", "2k": "2K" } },
+      valueMaps: {
+        resolution: { "1k": "1K", "2k": "2K" },
+        // "auto" is not in the endpoint enum — drop it and let the server
+        // default (verified live: the router 400s "auto" outright).
+        aspect_ratio: { auto: null },
+      },
       maxReferences: 3,
       referenceMode: "objects",
     },
@@ -469,7 +479,12 @@ const openRouterImageBindings: ModelProviderBinding[] = [
     keyEnv: OPENROUTER_KEY_ENV,
     paramMap: {
       fields: { ...OR_IMAGE_FIELDS, resolution: "tier" },
-      valueMaps: { resolution: { "1k": "1K", "2k": "2K" } },
+      valueMaps: {
+        resolution: { "1k": "1K", "2k": "2K" },
+        // "auto" is not in the endpoint enum — drop it and let the server
+        // default (verified live: the router 400s "auto" outright).
+        aspect_ratio: { auto: null },
+      },
       maxReferences: 3,
       referenceMode: "objects",
     },
@@ -548,7 +563,12 @@ const openRouterImageBindings: ModelProviderBinding[] = [
     keyEnv: OPENROUTER_KEY_ENV,
     paramMap: {
       fields: { ...OR_IMAGE_FIELDS, resolution: "tier", seed: "seed" },
-      valueMaps: { resolution: { "1k": "1K", "2k": "2K" } },
+      valueMaps: {
+        resolution: { "1k": "1K", "2k": "2K" },
+        // "auto" is not in the endpoint enum — drop it and let the server
+        // default (verified live: the router 400s "auto" outright).
+        aspect_ratio: { auto: null },
+      },
       maxReferences: 4,
       referenceMode: "objects",
     },
@@ -567,7 +587,12 @@ const openRouterImageBindings: ModelProviderBinding[] = [
     keyEnv: OPENROUTER_KEY_ENV,
     paramMap: {
       fields: { ...OR_IMAGE_FIELDS, resolution: "tier", seed: "seed" },
-      valueMaps: { resolution: { "1k": "1K", "2k": "2K" } },
+      valueMaps: {
+        resolution: { "1k": "1K", "2k": "2K" },
+        // "auto" is not in the endpoint enum — drop it and let the server
+        // default (verified live: the router 400s "auto" outright).
+        aspect_ratio: { auto: null },
+      },
       maxReferences: 4,
       referenceMode: "objects",
     },

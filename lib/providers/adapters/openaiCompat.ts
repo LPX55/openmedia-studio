@@ -217,13 +217,17 @@ function resolveFieldValue(
   }
 }
 
-/** Apply a dialect value map (normalized value → upstream value). */
+/** Apply a dialect value map (normalized value → upstream value). A map entry
+ * of null means DROP the field (used for catalog sentinels like "auto" that
+ * an endpoint's enum rejects — the server default applies instead). */
 function applyValueMap(
-  valueMap: Record<string, string> | undefined,
+  valueMap: Record<string, string | null> | undefined,
   value: string | number | string[],
-): string | number | string[] {
+): string | number | string[] | undefined {
   if (!valueMap || typeof value !== "string") return value;
-  return valueMap[value] ?? value;
+  if (!(value in valueMap)) return value;
+  const mapped = valueMap[value];
+  return mapped === null ? undefined : mapped;
 }
 
 /** The upstream output format the request asked for (for the buffer MIME). */

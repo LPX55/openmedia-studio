@@ -15,7 +15,7 @@ Media gallery + generation console at `/gallery?tab=images|videos&source=generat
 - **Mention engine**: `resolveGalleryMentions` rewrites `@imageN` tags into `<<<image N>>>` (or `@imageN` for grok format) and returns `extraUrls`/`extraAssets`; `splitByMentions`/`renderGalleryMentions` render chip spans; `removeTagAndRenumber` and `reorderAndRenumberTags` keep label numbering coherent.
 - `mergeByNewest` merges paginated fetches by `created_at` desc, dedup by `id`.
 - Pending gens persisted in `localStorage["aiui-pending-gens"]` with `prePending` stripped on restore (skips the 3s cancel window after refresh).
-- Components: `PendingGenTile` (spinner pill, pre-pending Cancel, prompt overlay), `EmptyFan`/`GalleryLoggedOut` (logged-out hero), `VideoFan`, `MediaPickerModal`, `QuickAssist`, `Kbd`, `DotCanvasBackground`.
+- Components: `PendingGenTile` (spinner pill, pre-pending Cancel, prompt overlay), `GalleryLoggedOut` (logged-out hero: icon badge + cycling model heading, no stock imagery), `MediaPickerModal`, `QuickAssist`, `Kbd`, `DotCanvasBackground`.
 - Thumb URLs built manually via `/_next/image?url=…&w=…&q=75` with `snapWidth` snapping to `NEXT_IMG_WIDTHS`; `thumbSrc` bypasses optimizer for blob/data/`/_next/` URLs.
 
 ## Flow

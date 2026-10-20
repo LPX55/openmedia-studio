@@ -416,39 +416,11 @@ function PendingGenTile({ pg, onCancel }: { pg: PendingGen; onCancel: () => void
 
 const CYCLE_NAMES = ["Nano Banana Pro", "GPT Image 2", "Nano Banana 2"];
 const VIDEO_CYCLE_NAMES = ["Seedance 2.0", "Kling 3.0", "Happy Horse"];
-const EMPTY_IMGS = ["/1.webp", "/2.webp", "/3.webp", "/4.webp"];
-
-function EmptyFan({ blur }: { blur?: boolean }) {
-  const configs = [
-    { rot: "-10deg", rounded: false, border: true, mr: "clamp(-36px,-1.5vw,-16px)", z: 4 },
-    { rot: "4deg",   rounded: false, border: true,  mr: "clamp(-36px,-1.5vw,-16px)", z: 3 },
-    { rot: "180deg", rounded: true,  border: true,  mr: "clamp(-36px,-1.5vw,-16px)", z: 2 },
-    { rot: "-4deg",  rounded: false, border: true,  mr: "0",                         z: 1 },
-  ];
-  return (
-    <div style={{ display: "flex", alignItems: "center", position: blur ? "absolute" : undefined, left: blur ? "50%" : undefined, top: blur ? 0 : undefined, transform: blur ? "translateX(-50%)" : undefined, filter: blur ? "blur(32px)" : undefined, opacity: blur ? 0.4 : 1 }}>
-      {configs.map((c, i) => (
-        <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginRight: c.mr, zIndex: c.z }}>
-          <div style={{ transform: `rotate(${c.rot})${c.rounded ? " scaleY(-1)" : ""}` }}>
-            <div style={{ position: "relative", overflow: "hidden", width: "clamp(64px,min(12vw,16vh),172px)", height: "clamp(64px,min(12vw,16vh),172px)", borderRadius: c.rounded ? "50%" : "12px", border: c.border ? "3px solid rgba(45,212,191,0.75)" : undefined, boxShadow: c.border ? "0 0 14px rgba(45,212,191,0.35), 0 0 4px rgba(45,212,191,0.2)" : undefined }}>
-              <img src={EMPTY_IMGS[i]} alt="" style={{ objectFit: "cover", width: "100%", height: "100%", display: "block" }} />
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function GalleryLoggedOut({ tab }: { tab: Tab }) {
   const [idx, setIdx] = useState(0);
   const [visible, setVisible] = useState(true);
   const names = tab === "videos" ? VIDEO_CYCLE_NAMES : CYCLE_NAMES;
-
-  useEffect(() => {
-    setIdx(0);
-    setVisible(true);
-  }, [tab]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -462,17 +434,53 @@ function GalleryLoggedOut({ tab }: { tab: Tab }) {
   }, [names]);
 
   return (
-    <div style={{ flex: 1, background: "#0B0E14", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: "clamp(12px,2.5vh,32px)", alignItems: "center", width: "100%", position: "relative" }}>
-        {tab === "videos" ? <><VideoFan blur /><VideoFan /></> : <><EmptyFan blur /><EmptyFan /></>}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: "8px" }}>
-          <div style={{ fontFamily: "var(--font-grotesk, sans-serif)", fontWeight: 700, fontSize: "clamp(20px,min(3vw,4.5vh),36px)", lineHeight: 1, letterSpacing: "-0.56px", textTransform: "uppercase" }}>
+    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "32px 24px", position: "relative" }}>
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          width: "min(520px, 85vw)",
+          height: "240px",
+          background: "radial-gradient(ellipse 60% 55% at 50% 50%, rgba(45, 212, 191, 0.09) 0%, rgba(34, 211, 238, 0.03) 45%, transparent 75%)",
+          pointerEvents: "none",
+        }}
+      />
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px", alignItems: "center", width: "100%", maxWidth: "540px", position: "relative", zIndex: 1 }}>
+        <div
+          style={{
+            width: "52px",
+            height: "52px",
+            borderRadius: "14px",
+            background: "linear-gradient(145deg, #141820 0%, #0D1119 100%)",
+            border: "1px solid rgba(45, 212, 191, 0.3)",
+            boxShadow: "0 0 24px rgba(45, 212, 191, 0.14), 0 4px 16px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#2DD4BF",
+          }}
+        >
+          {tab === "videos" ? (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="4" width="20" height="16" rx="3" />
+              <polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none" />
+            </svg>
+          ) : (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="3" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <path d="m21 15-5-5L5 21" />
+            </svg>
+          )}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: "10px" }}>
+          <div style={{ fontFamily: "var(--font-grotesk, sans-serif)", fontWeight: 700, fontSize: "clamp(20px,min(3vw,4.5vh),36px)", lineHeight: 1.08, letterSpacing: "-0.56px", textTransform: "uppercase" }}>
             <p style={{ color: "#fff", margin: 0 }}>Start creating with</p>
             <p style={{ color: "#2DD4BF", margin: 0, transition: "opacity 380ms ease, transform 380ms ease", opacity: visible ? 1 : 0, transform: visible ? "translateY(0)" : "translateY(6px)" }}>
-              {names[idx]}
+              {names[idx % names.length]}
             </p>
           </div>
-          <p style={{ fontSize: "clamp(13px,1.2vw,15px)", color: "rgba(255,255,255,0.65)", margin: 0 }}>Describe a scene, character, mood, or style to get started</p>
+          <p style={{ fontSize: "clamp(13px,1.2vw,15px)", color: "rgba(255,255,255,0.6)", margin: 0, lineHeight: 1.5 }}>Describe a scene, character, mood, or style to get started</p>
         </div>
       </div>
     </div>
@@ -676,20 +684,6 @@ function GalleryInner() {
   });
   const prePendingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const pendingGensRef = useRef(pendingGens);
-  useEffect(() => {
-    if (!("caches" in window)) return;
-    const CACHE_NAME = "hg-empty-state-v1";
-    // Only cache same-origin assets — cross-origin video URLs require CORS headers
-    // on the remote server which aren't configured, causing fetch errors.
-    const ASSETS = ["/1.webp", "/2.webp", "/3.webp", "/4.webp"];
-    caches.open(CACHE_NAME).then(cache => {
-      ASSETS.forEach(url => {
-        cache.match(url).then(hit => {
-          if (!hit) cache.add(url).catch(() => {});
-        });
-      });
-    });
-  }, []);
 
   useEffect(() => { pendingGensRef.current = pendingGens; }, [pendingGens]);
 
@@ -6672,96 +6666,6 @@ function Lightbox({ item, thumbUrl, onClose, onCopyPrompt, onPrev, onNext }: { i
       </button>
     </div>,
     document.body,
-  );
-}
-
-// ── EmptyState ────────────────────────────────────────────────────────────────
-
-const EMPTY_VIDEOS = [
-  "https://pub-2aecfc42d3474240b32b9438bf2e3905.r2.dev/videos/1768127686656-deb8718b-abdc-4482-8439-a86e3dbb9d48.mp4",
-  "https://pub-2aecfc42d3474240b32b9438bf2e3905.r2.dev/videos/1768127930665-06888ffc-490f-4896-ba17-80e0de76c091.mp4",
-  "https://pub-2aecfc42d3474240b32b9438bf2e3905.r2.dev/videos/1765097494972-45b681a4-b32a-4c7d-ab7a-267f40d5ccb8.mp4",
-  "https://pub-2aecfc42d3474240b32b9438bf2e3905.r2.dev/videos/1768078715583-0108%20(1)(9).mp4",
-];
-
-const VIDEO_FAN_CONFIGS = [
-  { rot: "-10deg", rounded: false, mr: "clamp(-36px,-1.5vw,-16px)", z: 4 },
-  { rot: "4deg",   rounded: false, mr: "clamp(-36px,-1.5vw,-16px)", z: 3 },
-  { rot: "180deg", rounded: true,  mr: "clamp(-36px,-1.5vw,-16px)", z: 2 },
-  { rot: "-4deg",  rounded: false, mr: "0",                         z: 1 },
-];
-
-function LoopingVideo({ src }: { src: string }) {
-  const videoRef = React.useRef<HTMLVideoElement>(null);
-  const canvasRef = React.useRef<HTMLCanvasElement>(null);
-  const [playing, setPlaying] = React.useState(false);
-
-  React.useEffect(() => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) return;
-
-    const captureFrame = () => {
-      const ctx = canvas.getContext("2d");
-      if (!ctx || !video.videoWidth) return;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    };
-
-    const onPlaying = () => setPlaying(true);
-
-    video.addEventListener("loadeddata", captureFrame);
-    video.addEventListener("playing", onPlaying);
-    return () => {
-      video.removeEventListener("loadeddata", captureFrame);
-      video.removeEventListener("playing", onPlaying);
-    };
-  }, []);
-
-  return (
-    <div style={{ position: "relative", width: "100%", height: "100%" }}>
-      <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: playing ? 0 : 1, transition: "opacity 0.4s ease" }} />
-      <video ref={videoRef} src={src} autoPlay loop muted playsInline preload="auto" style={{ objectFit: "cover", width: "100%", height: "100%", display: "block", pointerEvents: "none" }} />
-    </div>
-  );
-}
-
-function VideoFan({ blur }: { blur?: boolean }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", position: blur ? "absolute" : undefined, left: blur ? "50%" : undefined, top: blur ? 0 : undefined, transform: blur ? "translateX(-50%)" : undefined, filter: blur ? "blur(32px)" : undefined, opacity: blur ? 0.4 : 1 }}>
-      {VIDEO_FAN_CONFIGS.map((c, i) => (
-        <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginRight: c.mr, zIndex: c.z }}>
-          <div style={{ transform: `rotate(${c.rot})${c.rounded ? " scaleY(-1)" : ""}` }}>
-            <div style={{ position: "relative", overflow: "hidden", width: "clamp(64px,min(12vw,16vh),172px)", height: "clamp(64px,min(12vw,16vh),172px)", borderRadius: c.rounded ? "50%" : "12px", border: "3px solid rgba(45,212,191,0.75)", boxShadow: "0 0 14px rgba(45,212,191,0.35), 0 0 4px rgba(45,212,191,0.2)" }}>
-              <LoopingVideo src={EMPTY_VIDEOS[i]} />
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function EmptyState({ tab }: { tab: Tab }) {
-  if (tab === "videos") {
-    return (
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: "320px" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: "clamp(12px,2.5vh,32px)", alignItems: "center", width: "100%", position: "relative" }}>
-          <VideoFan blur />
-          <VideoFan />
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "320px", gap: "10px" }}>
-      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#252523" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
-        <><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></>
-      </svg>
-      <p style={{ color: "#3A3A38", fontSize: "13px" }}>No images yet</p>
-      <p style={{ color: "#252523", fontSize: "11px" }}>Use the prompt below to generate your first image</p>
-    </div>
   );
 }
 

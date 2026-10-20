@@ -300,6 +300,15 @@ function buildBody(
       if (source === "references" && spec.referenceMode === "first") {
         value = value[0];
       }
+      // OpenRouter `/v1/images` dialect: reference items are objects, not
+      // bare URL strings (verified live — Zod rejects strings with
+      // "expected object, received string").
+      if (source === "references" && spec.referenceMode === "objects") {
+        body[key] = Array.isArray(value)
+          ? value.map((u) => ({ type: "image_url", image_url: { url: u } }))
+          : value;
+        continue;
+      }
     }
     body[key] = value;
   }

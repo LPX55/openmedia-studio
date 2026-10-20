@@ -302,7 +302,7 @@ async function main() {
   eq("body prompt", body.prompt, baseInput.prompt);
   eq("body aspect_ratio", body.aspect_ratio, "16:9");
   eq("body resolution (tier mapped to the upstream enum)", body.resolution, "2K");
-  eq("body input_references", body.input_references, [REF_URL]);
+  eq("body input_references", body.input_references, [{ type: "image_url", image_url: { url: REF_URL } }]);
   ok("undeclared field `seed` is NOT sent", body.seed === undefined);
   ok("undeclared field `size` is NOT sent", body.size === undefined);
   ok("undeclared field `output_format` is NOT sent", body.output_format === undefined);
@@ -323,7 +323,7 @@ async function main() {
   await quiet(() => orProvider.submit({ ...baseInput, media: { references: manyRefs } }));
   const cappedBody = JSON.parse(String(capturedCalls[0]?.init?.body ?? "{}"));
   eq("upstream reference cap applied (14)", cappedBody.input_references?.length, 14);
-  eq("the cap keeps the FIRST references", cappedBody.input_references?.[0], "https://example.com/ref-0.png");
+  eq("the cap keeps the FIRST references", cappedBody.input_references?.[0], { type: "image_url", image_url: { url: "https://example.com/ref-0.png" } });
 
   capturedCalls.length = 0;
   stubbedResponse = () => fakeResponse({ data: [{ url: "https://cdn.example.com/out.png" }] });

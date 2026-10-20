@@ -83,9 +83,11 @@ export type CompatFieldSource =
  *  - `maxReferences` — upstream reference-image cap (per-model, from the
  *                    binding-availability spike).
  *  - `referenceMode` — how the staged references are shaped in the body:
- *                    "array" (default — `["url", …]`, the OpenAI shape) or
+ *                    "array" (default — `["url", …]`, the OpenAI shape),
  *                    "first" (a single URL string — for backends whose
- *                    reference field takes ONE url).
+ *                    reference field takes ONE url), or "objects"
+ *                    (`[{type:"image_url",image_url:{url}}, …]` — the
+ *                    OpenRouter `/v1/images` dialect, verified live).
  */
 export type CompatParamMap = {
   fields?: Record<string, CompatFieldSource>;
@@ -93,7 +95,7 @@ export type CompatParamMap = {
   constants?: Record<string, string>;
   modelKey?: string;
   maxReferences?: number;
-  referenceMode?: "array" | "first";
+  referenceMode?: "array" | "first" | "objects";
 };
 
 /**
@@ -350,6 +352,7 @@ const openRouterImageBindings: ModelProviderBinding[] = [
     paramMap: {
       fields: { ...OR_IMAGE_FIELDS },
       maxReferences: 3,
+      referenceMode: "objects",
     },
   },
 
@@ -368,6 +371,7 @@ const openRouterImageBindings: ModelProviderBinding[] = [
       fields: { ...OR_IMAGE_FIELDS, resolution: "tier" },
       valueMaps: { resolution: { "1k": "1K", "2k": "2K", "4k": "4K" } },
       maxReferences: 14,
+      referenceMode: "objects",
     },
   },
 
@@ -385,6 +389,7 @@ const openRouterImageBindings: ModelProviderBinding[] = [
       fields: { ...OR_IMAGE_FIELDS, resolution: "tier" },
       valueMaps: { resolution: { "1k": "1K", "2k": "2K", "4k": "4K" } },
       maxReferences: 14,
+      referenceMode: "objects",
     },
   },
 
@@ -403,6 +408,7 @@ const openRouterImageBindings: ModelProviderBinding[] = [
       fields: { ...OR_IMAGE_FIELDS, resolution: "tier" },
       valueMaps: { resolution: { "2k": "2K", "4k": "4K" } },
       maxReferences: 14,
+      referenceMode: "objects",
     },
   },
 
@@ -421,6 +427,7 @@ const openRouterImageBindings: ModelProviderBinding[] = [
       fields: { ...OR_IMAGE_FIELDS, resolution: "tier" },
       valueMaps: { resolution: { "1k": "1K", "2k": "2K" } },
       maxReferences: 14,
+      referenceMode: "objects",
     },
   },
 
@@ -443,6 +450,7 @@ const openRouterImageBindings: ModelProviderBinding[] = [
       fields: { ...OR_IMAGE_FIELDS, resolution: "tier" },
       valueMaps: { resolution: { "1k": "1K", "2k": "2K" } },
       maxReferences: 3,
+      referenceMode: "objects",
     },
   },
 
@@ -463,6 +471,7 @@ const openRouterImageBindings: ModelProviderBinding[] = [
       fields: { ...OR_IMAGE_FIELDS, resolution: "tier" },
       valueMaps: { resolution: { "1k": "1K", "2k": "2K" } },
       maxReferences: 3,
+      referenceMode: "objects",
     },
   },
 
@@ -483,6 +492,7 @@ const openRouterImageBindings: ModelProviderBinding[] = [
       fields: { ...OR_IMAGE_FIELDS, quality: "tier" },
       valueMaps: { quality: { "1k": "low", "2k": "medium", "4k": "high" } },
       maxReferences: 16,
+      referenceMode: "objects",
     },
   },
 
@@ -501,6 +511,7 @@ const openRouterImageBindings: ModelProviderBinding[] = [
       fields: { ...OR_IMAGE_FIELDS, quality: "tier" },
       valueMaps: { quality: { "1k": "low", "2k": "medium", "4k": "high" } },
       maxReferences: 16,
+      referenceMode: "objects",
     },
   },
 
@@ -518,6 +529,7 @@ const openRouterImageBindings: ModelProviderBinding[] = [
       fields: { ...OR_IMAGE_FIELDS, quality: "tier" },
       valueMaps: { quality: { "1k": "low", "2k": "medium", "4k": "high" } },
       maxReferences: 16,
+      referenceMode: "objects",
     },
   },
 
@@ -538,6 +550,7 @@ const openRouterImageBindings: ModelProviderBinding[] = [
       fields: { ...OR_IMAGE_FIELDS, resolution: "tier", seed: "seed" },
       valueMaps: { resolution: { "1k": "1K", "2k": "2K" } },
       maxReferences: 4,
+      referenceMode: "objects",
     },
   },
 
@@ -556,6 +569,7 @@ const openRouterImageBindings: ModelProviderBinding[] = [
       fields: { ...OR_IMAGE_FIELDS, resolution: "tier", seed: "seed" },
       valueMaps: { resolution: { "1k": "1K", "2k": "2K" } },
       maxReferences: 4,
+      referenceMode: "objects",
     },
   },
 ];

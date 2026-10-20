@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, Fragment } fr
 import { useAnimatedPopup } from "@/lib/useAnimatedPopup";
 import { createPortal } from "react-dom";
 import GenerateButton from "@/components/nodes/GenerateButton";
+import JobLogViewer from "@/components/JobLogViewer";
 import { Handle, Position, NodeProps, Node, useUpdateNodeInternals } from "@xyflow/react";
 import CornerResizer from "./CornerResizer";
 import NodeActionBar from "./NodeActionBar";
@@ -214,6 +215,7 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
 
   const [loading, setLoading] = useState(false);
   const [genCount, setGenCount] = useState(1);
+  const [logOpen, setLogOpen] = useState(false);
   const [hoveredHand, setHoveredHand] = useState<string | null>(null);
   const [hoveredSourceHandle, setHoveredSourceHandle] = useState<string | null>(null);
   const [errorHandles, setErrorHandles] = useState<Set<string>>(new Set());
@@ -305,7 +307,7 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
       id: newId,
       position: { x: src.position.x + 20, y: src.position.y + 20 },
       selected: true,
-      data: { ...src.data, status: "idle" as const, taskId: undefined, hasError: false },
+      data: { ...src.data, status: "idle" as const, taskId: undefined, lastTaskId: undefined, hasError: false },
     });
     state.edges
       .filter((e) => (e.source === id || e.target === id) && e.deletable !== false)
@@ -419,6 +421,10 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
   const animBusy = loading || status === "running";
   const busy = animBusy || isPending;
   const isQueued = !busy && !!data.pipelineQueued;
+  // The job the run log shows: the live task while it runs, the last one
+  // after it settled (`lastTaskId` outlives `taskId`, which is cleared on
+  // settle). Read-only — it never touches the node's status machine.
+  const logTaskId = (data.taskId as string | undefined) ?? (data.lastTaskId as string | undefined);
   useGeneratingBorderAnimation(cardRef, animBusy);
   const videoUrl = data.videoUrl as string | undefined;
   const capturedFrameUrl = data.capturedFrameUrl as string | undefined;
@@ -630,6 +636,7 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
   const closeAll = () => {
     setModelOpen(false); setRatioOpen(false); setDurOpen(false);
     setModeOpen(false); setGrokResOpen(false);
+    setLogOpen(false);
     setHovering(false);
   };
 
@@ -1086,8 +1093,10 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
         let json: { taskId?: string; error?: string } = {};
         try { json = JSON.parse(text); } catch { throw new Error(res.ok ? "Invalid server response" : `Server error ${res.status}`); }
         if (!res.ok) throw new Error(json.error ?? `Server error ${res.status}`);
-        // Store taskId — the polling useEffect above will wait for completion
-        updateNodeData(id, { taskId: json.taskId });
+        // Store taskId — the polling useEffect above will wait for completion.
+        // `lastTaskId` keeps the id after the job settles, so the run log
+        // stays readable; `taskId` keeps its existing lifecycle.
+        updateNodeData(id, { taskId: json.taskId, lastTaskId: json.taskId });
       } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
         const storeNode = useWorkflowStore.getState().nodes.find((n) => n.id === id);
@@ -1139,6 +1148,7 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
           currentGenIdx: 0,
           imageNaturalRatio: undefined,
           taskId: undefined,
+          lastTaskId: undefined,
           hasError: false,
           pendingGenerate: true,
         },
@@ -1791,6 +1801,24 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
             >
               {/* Pills — wrap freely */}
               <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+
+                {/* Run log — read-only disclosure over the job's event trail */}
+                {logTaskId && (
+                  <div className="relative">
+                    <Pill onClick={() => { setLogOpen((o) => !o); setModelOpen(false); setRatioOpen(false); setDurOpen(false); setModeOpen(false); setGrokResOpen(false); }}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M4 4h16v16H4z" />
+                        <path d="M8 9h8M8 13h8M8 17h5" />
+                      </svg>
+                      <span className="text-[11px] text-white/70">Run log</span>
+                    </Pill>
+                    <FloatMenu open={logOpen}>
+                      <div className="px-2.5 py-2 w-72" onMouseDown={(e) => e.stopPropagation()}>
+                        <JobLogViewer taskId={logTaskId} maxHeight={200} />
+                      </div>
+                    </FloatMenu>
+                  </div>
+                )}
 
                 {/* Model */}
                 <div className="relative">

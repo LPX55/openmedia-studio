@@ -50,6 +50,7 @@ the result lands in the in-memory `jobStore` (`lib/jobStore.ts`) via
 |---|---|---|
 | `/api/job-status` | GET | One-shot poll of `jobStore`, with DB recovery after restart |
 | `/api/job-stream` | GET | SSE stream that emits the settled job result (12-min cap, 25-s heartbeat) |
+| `/api/jobs/[taskId]/log` | GET | The job's event trail (`lib/jobLog.ts`): `{ taskId, status, providerId, model, trail[], recoveredFromDb }` — falls back to the `generations` row, never 500s |
 
 ### Settings
 

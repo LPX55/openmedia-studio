@@ -22,6 +22,7 @@
  */
 import { randomUUID } from "crypto";
 import { jobStore, type JobResult, type ProviderMeta } from "./jobStore";
+import { appendJobLog, describeError } from "./jobLog";
 import { jobEvents } from "./jobEvents";
 import { mirrorToR2, uploadBuffer } from "./storage";
 import * as guestDb from "./guest/db";
@@ -48,6 +49,13 @@ const RESTART_ERROR = "Server restarted while local job was in progress";
 
 const POLL_INTERVAL_MS = 3_000;
 const MAX_POLL_MS = 12 * 60 * 1000; // matches the SSE hard cap in job-status
+
+/**
+ * How often a poll tick is STORED in the trail. The console line is written
+ * for every tick (debug granularity); the trail keeps the first tick, every
+ * state change and every Nth tick, so a 12-minute loop cannot flood it.
+ */
+const POLL_TRAIL_EVERY = 10;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -81,6 +89,7 @@ export async function settleJob(
   if (current && current.status !== "pending") {
     activeSubmits.delete(taskId);
     activePollers.delete(taskId);
+    appendJobLog(taskId, "settle", "settle ignored — the job is already terminal");
     return;
   }
 
@@ -90,6 +99,7 @@ export async function settleJob(
 
     if (outcome.status === "error") {
       result = { status: "error", error: outcome.error, providerId };
+      appendJobLog(taskId, "settle", `settling as error · ${outcome.error}`);
     } else {
       // Remote result urls (kie-style) → mirror into MEDIA_DIR; on failure keep
       // the source urls, exactly like kieJobPoller's settleSuccess fallback.
@@ -99,34 +109,50 @@ export async function settleJob(
           urls = await Promise.all(urls.map((u) => mirrorToR2(u, folder)));
         } catch (e) {
           console.error(`[jobManager] ${taskId} url mirror failed, using source urls:`, (e as Error).message);
+          appendJobLog(taskId, "error", `url mirror failed — keeping the source urls · ${describeError(e)}`);
         }
       }
       // Local buffers (Azure/OpenAI base64 or a Codex CLI output file) go
       // straight to MEDIA_DIR via uploadBuffer.
+      const bufferCount = outcome.buffers?.length ?? 0;
       if (outcome.buffers?.length) {
         const stored = await Promise.all(
           outcome.buffers.map((b) => uploadBuffer(b.buffer, b.mimeType, folder)),
         );
         urls = [...urls, ...stored];
       }
+      appendJobLog(
+        taskId,
+        "settle",
+        `settling as done · mirrored ${urls.length} url(s) · ${bufferCount} buffer(s)`,
+      );
       result = kind === "video"
         ? { status: "done", videoUrl: urls[0], providerId }
         : { status: "done", imageUrl: urls[0], imageUrls: urls, providerId };
     }
 
     jobStore.set(taskId, result);
+    // One UPDATE: the terminal state + the last error + the trail, so the log
+    // survives a restart (the read API falls back to the generations row).
+    const dbUpdate: Parameters<typeof guestDb.updateGeneration>[1] = {
+      job_log: JSON.stringify(jobStore.getTrail(taskId)),
+    };
     if (result.status === "done") {
-      guestDb.updateGeneration(
-        taskId,
-        kind === "video"
-          ? { status: "done", video_url: result.videoUrl }
-          : { status: "done", image_url: result.imageUrl, image_urls: result.imageUrls },
-      );
+      dbUpdate.status = "done";
+      if (kind === "video") dbUpdate.video_url = result.videoUrl;
+      else {
+        dbUpdate.image_url = result.imageUrl;
+        dbUpdate.image_urls = result.imageUrls;
+      }
     } else if (result.status === "error") {
-      guestDb.updateGeneration(taskId, { status: "error", error_msg: result.error });
+      dbUpdate.status = "error";
+      dbUpdate.error_msg = result.error;
     }
+    guestDb.updateGeneration(taskId, dbUpdate);
+    appendJobLog(taskId, "settle", "job store + generations row updated");
     // Fixes the O1 SSE bug: Azure/Codex completions now wake /api/job-stream.
     jobEvents.emit(`job:${taskId}`, result);
+    appendJobLog(taskId, "settle", `SSE event emitted · job:${taskId}`);
   } finally {
     // Single release point for both registries (design.md §2.2 step 5, C2) —
     // must run even if store/DB/emit throws, or a leaked entry would make the
@@ -151,8 +177,12 @@ async function runProviderPollLoop(
   const cfg = guestDb.getProviderRuntimeConfig(String(provider.id));
   const deadline = Date.now() + MAX_POLL_MS;
 
+  let tick = 0;
+  let lastState = "";
+
   while (Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS);
+    tick += 1;
 
     let outcome;
     try {
@@ -160,8 +190,21 @@ async function runProviderPollLoop(
     } catch (e) {
       // Transient poll errors retry — same contract as the old kie loop.
       console.warn(`[jobManager] ${taskId} transient poll error:`, (e as Error).message);
+      appendJobLog(taskId, "poll", `tick ${tick} failed · ${describeError(e)}`, {
+        store: tick === 1 || tick % POLL_TRAIL_EVERY === 0,
+      });
       continue;
     }
+
+    // The console line is written for EVERY tick (debug granularity); the
+    // trail keeps the first tick, every state change and every Nth tick.
+    appendJobLog(
+      taskId,
+      "poll",
+      `tick ${tick} · state ${outcome.state}${outcome.state === "pending" && outcome.progress !== undefined ? ` · ${outcome.progress}%` : ""}`,
+      { store: tick === 1 || outcome.state !== lastState || tick % POLL_TRAIL_EVERY === 0 },
+    );
+    lastState = outcome.state;
 
     if (outcome.state === "done") {
       await settleJob(taskId, kind, String(provider.id), {
@@ -178,6 +221,7 @@ async function runProviderPollLoop(
     // pending → keep polling
   }
 
+  appendJobLog(taskId, "poll", `poll deadline reached after ${tick} tick(s) — timing out`);
   await settleJob(taskId, kind, String(provider.id), { status: "error", error: "Generation timed out" });
 }
 
@@ -191,14 +235,28 @@ async function runProviderPollLoop(
  */
 export function startPolling(taskId: string, providerId: string, kind: JobKind, meta?: ProviderMeta): void {
   if (!taskId || activePollers.has(taskId)) return;
-  if (meta?.family === "kie-google-veo") return; // C4 spike fallback — unpolled family
+  if (meta?.family === "kie-google-veo") {
+    appendJobLog(taskId, "poll", "poll loop skipped — the Veo family is unpolled (C4 spike fallback)");
+    return;
+  }
   const provider = getRegisteredProvider(providerId);
-  if (!provider?.poll) return;
+  if (!provider?.poll) {
+    appendJobLog(taskId, "poll", `poll loop skipped — the provider "${providerId}" has no poll implementation`);
+    return;
+  }
 
   const upstreamTaskId = meta?.upstreamTaskId ?? taskId;
   activePollers.add(taskId);
+  appendJobLog(
+    taskId,
+    "poll",
+    `poll loop started · provider ${providerId} · family ${meta?.family ?? "standard"} · interval ${POLL_INTERVAL_MS}ms`,
+  );
   void runProviderPollLoop(provider, taskId, upstreamTaskId, kind, meta)
-    .catch((e) => console.error(`[jobManager] poll for ${taskId} crashed:`, e))
+    .catch((e) => {
+      console.error(`[jobManager] poll for ${taskId} crashed:`, e);
+      appendJobLog(taskId, "error", `poll loop crashed · ${describeError(e)}`);
+    })
     .finally(() => activePollers.delete(taskId));
 }
 
@@ -243,12 +301,21 @@ export async function submitJob(
     credentials: guestDb.getProviderRuntimeConfig(providerId),
   };
 
+  // The trail starts BEFORE the upstream call — a submit that dies inside the
+  // provider must still leave a trace (the "fetch failed" gap).
+  appendJobLog(
+    taskId,
+    "submit",
+    `task pre-minted · provider ${providerId} · model ${input.model.id} · kind ${kind}`,
+  );
+
   jobStore.set(taskId, {
     status: "pending",
     type: kind,
     userId: GUEST_USER_ID ?? undefined,
     providerId,
   });
+  appendJobLog(taskId, "submit", "pending record written to the job store");
 
   // Pre-insert the pending row BEFORE the upstream call (design §2.1) so a
   // crash mid-submit can't orphan the job; settleJob updates it on completion.
@@ -268,16 +335,20 @@ export async function submitJob(
     reference_image_urls: flattenStagedMedia(input.media),
     provider_id: providerId,
   });
+  appendJobLog(taskId, "submit", "pending row written to guest.db");
 
   // C2: mark the submit live — released ONLY when settleJob runs, so the
   // client's first status poll can't false-kill a job that's still running.
   registerSubmit(taskId);
+  appendJobLog(taskId, "submit", "submit registered as live (activeSubmits)");
 
   void (async () => {
     try {
+      appendJobLog(taskId, "submit", "upstream submit started");
       const outcome = await provider.submit(fullInput);
 
       if (outcome.mode === "sync") {
+        appendJobLog(taskId, "submit", "upstream answered synchronously");
         await settleJob(taskId, kind, providerId, {
           status: "done",
           urls: outcome.mediaUrls,
@@ -302,6 +373,11 @@ export async function submitJob(
         providerMeta: meta,
       });
       guestDb.updateGeneration(taskId, { provider_meta: meta });
+      appendJobLog(
+        taskId,
+        "submit",
+        `upstream task accepted · family ${meta.family} · model ${meta.upstreamModelId}`,
+      );
 
       if (meta.family === "kie-google-veo") {
         // C4 spike fallback: Veo is the one unpolled family (the record-info
@@ -320,6 +396,7 @@ export async function submitJob(
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error(`[jobManager] ${providerId} submit for ${taskId} failed:`, msg);
+      appendJobLog(taskId, "error", `submit failed · ${describeError(e)}`);
       await settleJob(taskId, kind, providerId, { status: "error", error: msg });
     }
   })();
@@ -338,14 +415,21 @@ export async function submitJob(
  */
 export function resumeJob(taskId: string): void {
   if (!taskId) return;
-  if (isActive(taskId)) return;   // live submit (current boot) or live poll — C2
+  if (isActive(taskId)) {
+    appendJobLog(taskId, "resume", "resume skipped — the job is still live in this process", { store: false });
+    return;   // live submit (current boot) or live poll — C2
+  }
 
   const stored = jobStore.get(taskId);
-  if (stored && stored.status !== "pending") return; // already settled
+  if (stored && stored.status !== "pending") {
+    appendJobLog(taskId, "resume", "resume skipped — the job is already settled", { store: false });
+    return; // already settled
+  }
 
   const gen = guestDb.recoverJob(taskId);
   if (gen && gen.status !== "pending") {
     // generations row is terminal — sync it back into jobStore (legacy readability).
+    appendJobLog(taskId, "resume", `recovered the terminal state "${gen.status}" from the generations row`);
     jobStore.set(
       taskId,
       gen.status === "done"
@@ -356,7 +440,10 @@ export function resumeJob(taskId: string): void {
     );
     return;
   }
-  if (!stored && !gen) return; // nothing known — leave unknown tasks untouched
+  if (!stored && !gen) {
+    appendJobLog(taskId, "resume", "resume skipped — nothing known about this task", { store: false });
+    return; // nothing known — leave unknown tasks untouched
+  }
 
   let providerId = stored?.providerId ?? gen?.provider_id;
   const meta = stored?.providerMeta ?? gen?.provider_meta;
@@ -372,6 +459,7 @@ export function resumeJob(taskId: string): void {
   const jobKind: JobKind = kind === "video" ? "video" : "image";
 
   if (providerId === "kie") {
+    appendJobLog(taskId, "resume", "restarting the poll loop for the recovered task");
     startPolling(taskId, providerId, jobKind, meta);
     return;
   }
@@ -379,8 +467,10 @@ export function resumeJob(taskId: string): void {
     // In-process job with no upstream to reconnect to. If we got here the
     // submit isn't running in this process (isActive was false) — the process
     // that owned it is gone, so settle it cleanly instead of hanging the UI.
+    appendJobLog(taskId, "resume", "orphaned in-process job — settling it as an error");
     void settleJob(taskId, jobKind, providerId, { status: "error", error: RESTART_ERROR });
     return;
   }
   // Unknown provider (no adapter registered) — leave pending untouched.
+  appendJobLog(taskId, "resume", `unknown provider "${providerId}" — the task stays pending`);
 }

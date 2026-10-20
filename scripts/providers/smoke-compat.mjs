@@ -37,6 +37,13 @@
  *      posts to the binding's media store and the "remote-url" staging
  *      routes a local reference through it, and the settings endpoint
  *      reports the backend.
+ *  10. JOB TRAIL + BOUNDED RETRY — the per-job trail is capped (last 50
+ *      entries) and survives a status write, the redaction strips keys /
+ *      data: payloads / URL userinfo, a NETWORK failure (DNS) is retried
+ *      exactly ONCE, and an HTTP 5xx is NOT retried at all.
+ *  11. THE RUN-LOG READ API — `GET /api/jobs/[taskId]/log` answers 200 with
+ *      the trail of a known job and with a clear empty shape for an unknown
+ *      one (never a 500).
  *
  * HOW TO RUN
  *
@@ -779,6 +786,109 @@ async function main() {
   ok("ProviderBrandIcon has an openrouter mark", /id === "openrouter"/.test(clientIcon));
   ok("ProviderBrandIcon has a pollinations mark", /id === "pollinations"/.test(clientIcon));
   ok("no client PROVIDERS.find() non-null assertion is left", !/PROVIDERS\.find\([^)]*\)!/.test(await readFile(join(ROOT, "components/SettingsModal.tsx"), "utf8")));
+
+  // ── 10. Job trail + bounded retry (stubbed fetch) ─────────────────────────
+  section("job trail + bounded retry");
+  const jobLogMod = await import(pathToFileURL(join(ROOT, "lib/jobLog.ts")).href);
+  const jobStoreMod = await import(pathToFileURL(join(ROOT, "lib/jobStore.ts")).href);
+
+  // The trail is append-only and CAPPED (the last 50 entries survive).
+  const capId = "smoke-trail-cap";
+  for (let i = 0; i < 60; i += 1) {
+    jobStoreMod.jobStore.appendTrail(capId, { t: Date.now() + i, phase: "poll", detail: `entry ${i}` });
+  }
+  const capped = jobStoreMod.jobStore.getTrail(capId);
+  eq("the trail is capped at 50 entries", capped.length, 50);
+  eq("the trail keeps the NEWEST entry", capped[capped.length - 1]?.detail, "entry 59");
+  eq("the trail drops the oldest entries", capped[0]?.detail, "entry 10");
+
+  // The trail survives the status write the settle funnel does.
+  jobStoreMod.jobStore.set(capId, { status: "done", imageUrl: "/generated/x.png" });
+  eq("the trail survives a status write", jobStoreMod.jobStore.getTrail(capId).length, 50);
+  eq("the status write keeps the record's status", jobStoreMod.jobStore.get(capId)?.status, "done");
+
+  // Redaction — no key, no data: payload, no URL userinfo, no long blob.
+  const secret = "sk-or-super-secret-key";
+  const redacted = jobLogMod.redactLogText(
+    `key=${secret} payload=data:image/png;base64,AAAABBBBCCCCDDDD host=https://${secret}@example.com/x`,
+  );
+  ok("the api key is redacted", !redacted.includes(secret), redacted);
+  ok("the data: payload is redacted", !redacted.includes("base64,AAAABBBBCCCCDDDD"), redacted);
+  ok("the url userinfo is redacted", !redacted.includes(`${secret}@`), redacted);
+  eq("the host survives the redaction", jobLogMod.urlHost("https://api.openrouter.ai/api/v1/images"), "api.openrouter.ai");
+  eq("a url with a key yields only its host", jobLogMod.urlHost(`https://${secret}@api.openrouter.ai/x`), "api.openrouter.ai");
+
+  // A NETWORK-level failure (DNS) is retried exactly ONCE.
+  const retryId = "smoke-retry-once";
+  let netCalls = 0;
+  globalThis.fetch = async () => {
+    netCalls += 1;
+    const err = new TypeError("fetch failed");
+    err.cause = { code: "ENOTFOUND" };
+    throw err;
+  };
+  let netError = null;
+  try {
+    await quiet(() => orProvider.submit({ ...baseInput, taskId: retryId }));
+  } catch (err) {
+    netError = err;
+  }
+  eq("a network failure is retried exactly once (2 attempts)", netCalls, 2);
+  ok("the network failure surfaces as an error", !!netError);
+  const retryTrail = jobStoreMod.jobStore.getTrail(retryId);
+  ok("the trail records the retry", retryTrail.some((e) => e.phase === "retry"));
+  ok("the trail records the attempt", retryTrail.some((e) => e.phase === "submit" && /attempt 1/.test(e.detail)));
+  ok("the trail never carries the api key", !JSON.stringify(retryTrail).includes("sk-or-smoke-key"));
+  ok("the trail never carries the full request body", !JSON.stringify(retryTrail).includes(baseInput.prompt));
+
+  // An HTTP 5xx is NOT retried — the request reached the server.
+  let httpCalls = 0;
+  globalThis.fetch = async () => {
+    httpCalls += 1;
+    return fakeResponse({ error: "boom" }, { ok: false, status: 500 });
+  };
+  let httpError = null;
+  try {
+    await quiet(() => orProvider.submit({ ...baseInput, taskId: "smoke-no-retry-500" }));
+  } catch (err) {
+    httpError = err;
+  }
+  eq("an HTTP 5xx is NOT retried (1 attempt)", httpCalls, 1);
+  ok("the HTTP error surfaces", !!httpError);
+
+  // Restore the fixture's stub for the (optional) live step.
+  globalThis.fetch = async (url, init) => {
+    capturedCalls.push({ url: String(url), init });
+    return stubbedResponse();
+  };
+
+  // ── 11. The run-log read API ───────────────────────────────────────────────
+  section("GET /api/jobs/[taskId]/log");
+  const logRoute = await import(pathToFileURL(join(ROOT, "app/api/jobs/[taskId]/log/route.ts")).href);
+  const apiTaskId = "smoke-log-task";
+  jobStoreMod.jobStore.set(apiTaskId, { status: "pending", type: "image", providerId: "openrouter" });
+  jobStoreMod.jobStore.appendTrail(apiTaskId, { t: Date.now(), phase: "submit", detail: "task pre-minted" });
+
+  const knownRes = await logRoute.GET(new Request("http://local/api/jobs/x/log"), {
+    params: Promise.resolve({ taskId: apiTaskId }),
+  });
+  eq("the log route answers 200", knownRes.status, 200);
+  const knownPayload = await knownRes.json();
+  eq("the log route echoes the taskId", knownPayload.taskId, apiTaskId);
+  eq("the log route reports the status", knownPayload.status, "pending");
+  eq("the log route reports the provider", knownPayload.providerId, "openrouter");
+  eq("the log route returns the trail", knownPayload.trail?.length, 1);
+  eq("the trail entry keeps its phase", knownPayload.trail?.[0]?.phase, "submit");
+
+  // An unknown id must NOT 500 — it answers with a clear empty shape.
+  const unknownRes = await logRoute.GET(new Request("http://local/api/jobs/x/log"), {
+    params: Promise.resolve({ taskId: "smoke-unknown-task" }),
+  });
+  eq("an unknown task answers 200 (never 500)", unknownRes.status, 200);
+  const unknownPayload = await unknownRes.json();
+  eq("an unknown task reports not_found", unknownPayload.status, "not_found");
+  eq("an unknown task has an empty trail", unknownPayload.trail?.length, 0);
+  eq("an unknown task has no provider", unknownPayload.providerId, null);
 
   // ── Live step (opt-in) ────────────────────────────────────────────────────
   section("live step");

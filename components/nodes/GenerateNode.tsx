@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "rea
 import { useAnimatedPopup } from "@/lib/useAnimatedPopup";
 import { createPortal } from "react-dom";
 import GenerateButton from "@/components/nodes/GenerateButton";
+import JobLogViewer from "@/components/JobLogViewer";
 import Image from "next/image";
 import { Handle, Position, NodeProps, Node, useUpdateNodeInternals } from "@xyflow/react";
 import CornerResizer from "./CornerResizer";
@@ -229,6 +230,7 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
   const azureResolutionPopup = useAnimatedPopup(azureResolutionOpen);
   const [loading, setLoading] = useState(false);
   const [genCount, setGenCount] = useState(1);
+  const [logOpen, setLogOpen] = useState(false);
   const [errorHandles, setErrorHandles] = useState<Set<string>>(new Set());
   const [hoveredHandle, setHoveredHandle] = useState<"prompt" | "image" | null>(null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -316,7 +318,7 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
       id: newId,
       position: { x: src.position.x + 20, y: src.position.y + 20 },
       selected: true,
-      data: { ...src.data, status: "idle" as const, taskId: undefined, hasError: false },
+      data: { ...src.data, status: "idle" as const, taskId: undefined, lastTaskId: undefined, hasError: false },
     });
     state.edges
       .filter((e) => (e.source === id || e.target === id) && e.deletable !== false)
@@ -443,6 +445,10 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
   const animBusy = loading || status === "running";
   const busy = animBusy || isPending;
   const isQueued = !busy && !!data.pipelineQueued;
+  // The job the run log shows: the live task while it runs, the last one
+  // after it settled (`lastTaskId` outlives `taskId`, which is cleared on
+  // settle). Read-only — it never touches the node's status machine.
+  const logTaskId = (data.taskId as string | undefined) ?? (data.lastTaskId as string | undefined);
   useGeneratingBorderAnimation(cardRef, animBusy);
 
   const [natW, natH] = (() => {
@@ -513,6 +519,7 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
     setRatioOpen(false);
     setQualityOpen(false);
     setAzureQualityOpen(false);
+    setLogOpen(false);
   };
 
   // ── Poll /api/job-status while a taskId is pending ──────────────────────────
@@ -714,7 +721,9 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
         if (!res.ok) throw new Error(json.error);
 
         // Both Kie and Azure now return { taskId } — polling useEffect handles the rest
-        updateNodeData(id, { taskId: json.taskId });
+        // `lastTaskId` keeps the id AFTER the job settles (the run log stays
+        // readable); `taskId` keeps its existing lifecycle (cleared on settle).
+        updateNodeData(id, { taskId: json.taskId, lastTaskId: json.taskId });
       } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
         const storeNode = useWorkflowStore.getState().nodes.find(n => n.id === id);
@@ -764,6 +773,7 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
           currentGenIdx: 0,
           imageNaturalRatio: undefined,
           taskId: undefined,
+          lastTaskId: undefined,
           hasError: false,
           pendingGenerate: true,
         },
@@ -1073,6 +1083,35 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
         >
           {/* Pills — wrap freely */}
           <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+
+          {/* Run log — read-only disclosure over the job's event trail */}
+          {logTaskId && (
+            <div className="relative shrink-0">
+              <button
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); setLogOpen((o) => !o); }}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full transition-all hover:brightness-125"
+                style={{ background: "rgba(0,0,0,0.45)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,0.07)" }}
+                title="Run log"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 4h16v16H4z" />
+                  <path d="M8 9h8M8 13h8M8 17h5" />
+                </svg>
+                <span className="text-[11px] text-white/70">Run log</span>
+              </button>
+              {logOpen && (
+                <div
+                  className="absolute bottom-full left-0 mb-2 w-72 bg-[#111622] border border-[#1E2840] rounded-md overflow-hidden z-[1002] shadow-2xl"
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <div className="px-2.5 py-2">
+                    <JobLogViewer taskId={logTaskId} maxHeight={200} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Model pill */}
           <div className="relative shrink-0">

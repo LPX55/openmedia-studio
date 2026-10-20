@@ -34,6 +34,8 @@ interface Generation {
   updated_at: string;
   provider_id?: string;
   provider_meta?: ProviderMeta;
+  /** JSON array of the job's trail entries (lib/jobLog.ts) — written at settle. */
+  job_log?: string;
 }
 
 interface Upload {
@@ -94,6 +96,7 @@ function rowToGeneration(r: GenRow): Generation {
     updated_at: r.updated_at as string,
     provider_id: (r.provider_id as string) ?? undefined,
     provider_meta: parseProviderMeta(r.provider_meta),
+    job_log: (r.job_log as string) ?? undefined,
   };
 }
 
@@ -130,7 +133,7 @@ export function insertGeneration(data: Omit<Generation, "id" | "created_at" | "u
 
 export function updateGeneration(
   taskId: string,
-  updates: Partial<Pick<Generation, "status" | "image_url" | "image_urls" | "video_url" | "error_msg" | "provider_meta">>,
+  updates: Partial<Pick<Generation, "status" | "image_url" | "image_urls" | "video_url" | "error_msg" | "provider_meta" | "job_log">>,
 ): void {
   const sets: string[] = ["updated_at = ?"];
   const vals: unknown[] = [now()];
@@ -140,6 +143,7 @@ export function updateGeneration(
   if ("video_url" in updates) { sets.push("video_url = ?"); vals.push(updates.video_url ?? null); }
   if ("error_msg" in updates) { sets.push("error_msg = ?"); vals.push(updates.error_msg ?? null); }
   if ("provider_meta" in updates) { sets.push("provider_meta = ?"); vals.push(updates.provider_meta ? JSON.stringify(updates.provider_meta) : null); }
+  if ("job_log" in updates) { sets.push("job_log = ?"); vals.push(updates.job_log ?? null); }
   vals.push(taskId);
   db().prepare(`UPDATE generations SET ${sets.join(", ")} WHERE task_id = ?`).run(...(vals as never[]));
 }
@@ -148,7 +152,17 @@ export function recoverJob(
   taskId: string,
 ): Pick<
   Generation,
-  "status" | "generation_type" | "video_url" | "image_url" | "image_urls" | "error_msg" | "provider_id" | "provider_meta"
+  | "status"
+  | "generation_type"
+  | "video_url"
+  | "image_url"
+  | "image_urls"
+  | "error_msg"
+  | "provider_id"
+  | "provider_meta"
+  | "model"
+  | "updated_at"
+  | "job_log"
 > | null {
   const r = db().prepare("SELECT * FROM generations WHERE task_id = ?").get(taskId) as GenRow | undefined;
   return r ? rowToGeneration(r) : null;

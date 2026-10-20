@@ -16,6 +16,11 @@ React hooks — imported by both `components/` (client) and `app/api/` (server).
   `jobEvents.ts` (in-process `EventEmitter` for SSE), `kieJobPoller.ts`
   (polls kie.ai in lieu of a webhook), `pendingJobs.ts` (global resolve/reject
   map for in-flight generate requests).
+- **Job trail (server)** — `jobLog.ts` appends the per-job event trail
+  (`{ t, phase, detail }`, capped at the last 50 entries, redacted — no keys,
+  no `data:` payloads, no full bodies) onto the `jobStore` record; the trail
+  is mirrored into the `generations.job_log` column at settle time and read
+  through `GET /api/jobs/[taskId]/log` (`components/JobLogViewer.tsx`).
 - **Graph execution (client)** — `executor.ts` (`topoSort`,
   `buildPipelineWaves`, `resolveInputs`), `usePipelineRunner.ts` (wave-by-wave
   orchestration), `arrangeNodes.ts` (grid layout).

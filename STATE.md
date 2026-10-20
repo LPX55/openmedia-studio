@@ -7,6 +7,30 @@ updated: 2026-10-21
 
 ## Notes
 
+- 2026-10-21 — Job trail + run-log viewer landed in the WORKING TREE (uncommitted, no
+  commits per the task) on `feat/pluggable-providers`: `lib/jobLog.ts` appends a
+  per-job, capped (last 50) event trail `{ t, phase, detail }` onto the jobStore
+  record — phases submit/poll/settle/resume/error/retry, every detail REDACTED
+  (no api keys, no `data:` payloads, no full bodies, URL hosts only). The
+  jobManager funnel (submitJob pre-mint → startPolling → settleJob → resumeJob)
+  is instrumented; the openai-compat submit got a bounded fetch (12-min budget,
+  ONE retry on transport failures only — HTTP 4xx/5xx are never replayed) and
+  logs attempt/timeout/status-class/error-kind. The trail is mirrored into the
+  new idempotent `generations.job_log` TEXT column at settle time and read
+  through `GET /api/jobs/[taskId]/log` (never 500s; falls back to the
+  generations row). `components/JobLogViewer.tsx` renders the phase timeline
+  and is wired into GenerateNode + VideoGeneratorNode ("Run log" disclosure)
+  and the gallery's pending tiles; the node status machine is untouched (a new
+  read-only `lastTaskId` node field keeps the log reachable after a run ends).
+  Validated: tsc exit 0, eslint zero-new-vs-HEAD (git-stash compare, 53 = 53),
+  the offline smoke fixture green at 291 assertions (new trail-cap /
+  retry-once / redaction / read-API section, stubbed fetch — zero network), and
+  the `job_log` migration verified on a copy of the real guest.db (3 rows kept,
+  idempotent on re-open). HOST NOTE: the root filesystem was 100% FULL (0 bytes
+  free) mid-task — the regenerable `.next/` build dir (526 MB) was deleted to
+  continue (~4.3 GB free now); `node_modules`, `data/` and `public/` were left
+  untouched.
+
 - 2026-10-20 — P6c (provider-refactor-impl) landed the Pollinations sync leg on
   `feat/pluggable-providers` — NO dedicated adapter: the backend is a second
   ALIAS of the openai-compat family (`provider.id "pollinations"`, keyEnv
@@ -45,3 +69,4 @@ updated: 2026-10-21
   and existing-DB opens clean with idempotent seeding and no data loss.
 - 2026-10-20 — P6a landed the openai-compat family (one adapter, OpenRouter
   dialect bindings, offline smoke fixture).
+- 2026-10-21 — PRE-SHIP reminder (user): sidebar "Assets" nav is a hardcoded disabled placeholder — revisit the data-storage methodology (guest.db + localStorage + MEDIA_DIR layout, single-user assumptions, export/backup story) before any public ship.

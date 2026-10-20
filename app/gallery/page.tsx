@@ -13,6 +13,7 @@ type User = { id: string };
 import { GalleryItem, getToken, galleryCache } from "@/lib/galleryUtils";
 import { useFolderStore } from "@/lib/folderStore";
 import { MediaPickerModal } from "@/components/MediaPickerModal";
+import JobLogViewer from "@/components/JobLogViewer";
 import { useSidebar } from "@/components/ui/sidebar";
 import { QuickAssist } from "@/components/QuickAssist";
 import DotCanvasBackground from "@/components/ui/DotCanvasBackground";
@@ -338,6 +339,7 @@ function saveKlingElements(elements: KlingElement[]) {
 // ── Pending generation tile (needs hooks, must be a component) ────────────────
 
 function PendingGenTile({ pg, onCancel }: { pg: PendingGen; onCancel: () => void }) {
+  const [logOpen, setLogOpen] = useState(false);
   return (
     <>
       {/* Top radial glow — blue-emerald with slow pulse */}
@@ -400,7 +402,43 @@ function PendingGenTile({ pg, onCancel }: { pg: PendingGen; onCancel: () => void
             <span style={{ fontSize: "11px", color: "#ccc", fontWeight: 500 }}>Cancel</span>
           </button>
         )}
+
+        {/* Run log — read-only disclosure over the job's event trail */}
+        {pg.taskId && (
+          <button
+            onClick={() => setLogOpen((o) => !o)}
+            title="Run log"
+            style={{
+              flexShrink: 0,
+              display: "flex", alignItems: "center", gap: "5px",
+              height: "26px", padding: "0 10px", borderRadius: "999px",
+              background: "rgba(0,0,0,0.58)", backdropFilter: "blur(10px)",
+              border: "1px solid rgba(255,255,255,0.08)", cursor: "pointer",
+              transition: "background 140ms",
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 4h16v16H4z" />
+              <path d="M8 9h8M8 13h8M8 17h5" />
+            </svg>
+            <span style={{ fontSize: "11px", color: "#ccc", fontWeight: 500 }}>Log</span>
+          </button>
+        )}
       </div>
+
+      {/* Run log panel — the job's event trail (read-only) */}
+      {logOpen && pg.taskId && (
+        <div
+          style={{
+            position: "absolute", left: 8, right: 8, top: 40, bottom: 8,
+            zIndex: 6, overflow: "auto", borderRadius: 8,
+            padding: 8, background: "rgba(10,12,16,0.95)",
+            border: "1px solid rgba(255,255,255,0.1)",
+          }}
+        >
+          <JobLogViewer taskId={pg.taskId} maxHeight={220} />
+        </div>
+      )}
 
       {/* Bottom: prompt */}
       {pg.prompt && (

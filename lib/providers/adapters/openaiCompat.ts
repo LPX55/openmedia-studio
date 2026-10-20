@@ -31,6 +31,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MEDIA_DIR } from "../../guest/paths";
+import { appendJobLog, describeError, urlHost } from "../../jobLog";
 import type { CompatFieldSource, CompatParamMap, ModelProviderBinding } from "../bindings";
 import type {
   GenerateInput,
@@ -50,6 +51,70 @@ const PROMPT_KEY = "prompt";
 
 /** Longest upstream request we wait for (image generation can be slow). */
 const REQUEST_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * Total budget of ONE submit (all attempts together). It matches the 12-min
+ * job ceiling of the SSE/poll path, so a submit can never outlive the job
+ * lifecycle it belongs to.
+ */
+const SUBMIT_BUDGET_MS = 12 * 60_000;
+
+/** How many attempts one submit makes: the original + ONE retry. */
+const MAX_ATTEMPTS = 2;
+
+// ── Failure classification (network level vs. not) ───────────────────────────
+
+/** The kind of a failed fetch. */
+export type FetchFailureKind = "network" | "timeout" | "abort" | "unknown";
+
+export interface FetchFailure {
+  kind: FetchFailureKind;
+  /**
+   * True for TRANSPORT failures (DNS, timeout, connection reset) — those get
+   * ONE retry. An HTTP 4xx/5xx is NOT a transport failure: the request
+   * reached the server, so it is never retried.
+   */
+  retryable: boolean;
+  /** The underlying errno code, when there is one. */
+  code?: string;
+}
+
+/** errno / undici codes that mean "the request never made it to the server". */
+const RETRYABLE_CODES = new Set([
+  "ENOTFOUND", "EAI_AGAIN", "ECONNRESET", "ECONNREFUSED", "ECONNABORTED",
+  "ETIMEDOUT", "EPIPE", "EHOSTUNREACH", "ENETUNREACH", "ENETDOWN",
+  "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_SOCKET",
+]);
+
+/**
+ * Classify a thrown fetch error. Only the transport failures are retryable —
+ * everything else (a bug in our own code, an aborted request) is not.
+ */
+export function classifyFetchError(e: unknown): FetchFailure {
+  const err = e as
+    | { name?: string; message?: string; cause?: { code?: string; errors?: Array<{ code?: string }> } }
+    | undefined;
+  const name = err?.name ?? "";
+  if (name === "TimeoutError") return { kind: "timeout", retryable: true, code: "ETIMEDOUT" };
+  if (name === "AbortError") return { kind: "abort", retryable: false };
+  const code = err?.cause?.code ?? err?.cause?.errors?.[0]?.code;
+  if (code && RETRYABLE_CODES.has(code)) return { kind: "network", retryable: true, code };
+  // "fetch failed" without a code is still a transport failure.
+  if (/fetch failed/i.test(err?.message ?? "")) {
+    return { kind: "network", retryable: true, code: code ?? "FETCH_FAILED" };
+  }
+  return { kind: "unknown", retryable: false, code };
+}
+
+/** The HTTP status CLASS — 2xx/3xx/4xx/5xx. Never the body. */
+function statusClass(status: number): string {
+  if (status >= 200 && status < 300) return "2xx";
+  if (status >= 300 && status < 400) return "3xx";
+  if (status >= 400 && status < 500) return "4xx";
+  if (status >= 500) return "5xx";
+  return "unknown";
+}
 
 // ── Credential / endpoint resolution ─────────────────────────────────────────
 
@@ -184,23 +249,23 @@ function mimeFor(outputFormat: string | undefined): string {
 }
 
 /**
- * Log-safe view of the request body: staged references are data URLs (base64
- * blobs), so only their count is logged.
+ * Log-safe view of the request: the SHAPE only.
+ *
+ * The body is never logged — the prompt is user content and the staged
+ * references are base64 blobs. Only the field names, the upstream model and
+ * the reference COUNT are safe to print.
  */
-function loggableBody(
+function bodyShape(
   body: Record<string, unknown>,
   spec: CompatParamMap,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...body };
+): { fields: string[]; stagedReferences: number } {
+  let stagedReferences = 0;
   for (const [key, source] of Object.entries(spec.fields ?? {})) {
     if (source !== "references") continue;
-    const v = out[key];
-    // The staged references are urls (or data-url blobs) — only their count
-    // is logged, whatever shape the dialect asked for.
-    const count = Array.isArray(v) ? v.length : v === undefined ? 0 : 1;
-    out[key] = `[${count} staged reference(s)]`;
+    const v = body[key];
+    stagedReferences += Array.isArray(v) ? v.length : v === undefined ? 0 : 1;
   }
-  return out;
+  return { fields: Object.keys(body).sort(), stagedReferences };
 }
 
 /**
@@ -453,6 +518,64 @@ async function uploadToMediaStore(
   return extractUploadUrl(text, res.headers.get("location"));
 }
 
+// ── Bounded fetch (one retry on transport failures) ───────────────────────────
+
+/**
+ * POST the body, retrying ONCE when the failure is a TRANSPORT failure
+ * (DNS, timeout, connection reset). An HTTP 4xx/5xx is NOT retried — the
+ * request reached the server, and replaying it would only cost money.
+ *
+ * The whole submit shares ONE budget (`SUBMIT_BUDGET_MS`, the 12-min job
+ * ceiling): the per-attempt timeout is capped by what is left of it, so a
+ * retry can never outlive the job lifecycle.
+ */
+async function fetchWithRetry(
+  taskId: string,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  const deadline = Date.now() + SUBMIT_BUDGET_MS;
+  const host = urlHost(url) ?? "unknown";
+  let attempt = 0;
+
+  for (;;) {
+    attempt += 1;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new Error("openai-compat: the 12-minute request budget is exhausted");
+    }
+    const timeoutMs = Math.min(REQUEST_TIMEOUT_MS, remaining);
+    appendJobLog(
+      taskId,
+      "submit",
+      `attempt ${attempt}/${MAX_ATTEMPTS} · host ${host} · timeout ${Math.round(timeoutMs / 1000)}s`,
+    );
+
+    try {
+      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+      appendJobLog(
+        taskId,
+        "submit",
+        `attempt ${attempt} answered · HTTP ${res.status} (${statusClass(res.status)})`,
+      );
+      return res;
+    } catch (e) {
+      const failure = classifyFetchError(e);
+      appendJobLog(
+        taskId,
+        "retry",
+        `attempt ${attempt} failed · ${failure.kind}${failure.code ? ` (${failure.code})` : ""} · ${describeError(e)}`,
+      );
+      if (!failure.retryable) throw e;
+      if (attempt >= MAX_ATTEMPTS) {
+        appendJobLog(taskId, "retry", "no retry left — the submit fails with this error");
+        throw e;
+      }
+      appendJobLog(taskId, "retry", `retrying once after a ${failure.kind} failure`);
+    }
+  }
+}
+
 // ── Adapter ──────────────────────────────────────────────────────────────────
 
 export const openaiCompatProvider: GenerationProvider = {
@@ -569,28 +692,44 @@ export const openaiCompatProvider: GenerationProvider = {
         : binding.upstreamModelId;
 
     const body = buildBody(input, upstreamModelId, spec);
+    const shape = bodyShape(body, spec);
 
+    // The request is logged as a SHAPE only — host, model, field names and
+    // the reference COUNT. Never the body (the prompt is user content, the
+    // staged references are base64 blobs) and never the key.
     console.log("[openai-compat] request →", {
-      url,
+      host: urlHost(url) ?? "unknown",
       model: upstreamModelId,
-      body: loggableBody(body, spec),
+      fields: shape.fields,
+      stagedReferences: shape.stagedReferences,
     });
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+    const res = await fetchWithRetry(
+      input.taskId,
+      url,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
       },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
+    );
 
     const text = await res.text();
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) {
         throw new Error("Invalid API key for this OpenAI-compatible backend — please update it in Settings.");
       }
+      // The upstream body is NOT logged (it can echo the prompt): only the
+      // status class and the body's SIZE go into the trail. The excerpt stays
+      // in the thrown error, which the job's terminal message already carries.
+      appendJobLog(
+        input.taskId,
+        "submit",
+        `upstream error · HTTP ${res.status} (${statusClass(res.status)}) · ${text.length} byte(s) of body`,
+      );
       throw new Error(`Upstream error ${res.status}: ${text.slice(0, 500)}`);
     }
 
@@ -605,6 +744,12 @@ export const openaiCompatProvider: GenerationProvider = {
     if (mediaUrls.length === 0 && rawBuffers.length === 0) {
       throw new Error("Upstream returned no image data");
     }
+
+    appendJobLog(
+      input.taskId,
+      "submit",
+      `upstream answered · ${mediaUrls.length} url(s) · ${rawBuffers.length} buffer(s)`,
+    );
 
     return { mode: "sync", mediaUrls, rawBuffers };
   },

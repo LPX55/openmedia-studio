@@ -125,6 +125,10 @@ function createSchema(d: DatabaseSync): void {
   );
   if (!genCols.has("provider_id"))   d.exec("ALTER TABLE generations ADD COLUMN provider_id TEXT;");
   if (!genCols.has("provider_meta")) d.exec("ALTER TABLE generations ADD COLUMN provider_meta TEXT;");
+  // The per-job event trail (lib/jobLog.ts) — JSON array of
+  // `{ t, phase, detail }` entries, written once at settle time. Idempotent
+  // like the two ALTERs above: fresh databases get the column the same way.
+  if (!genCols.has("job_log"))      d.exec("ALTER TABLE generations ADD COLUMN job_log TEXT;");
 
   seedParamPresets(d);
 }

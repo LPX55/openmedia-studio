@@ -68,6 +68,12 @@ export interface NodeData extends Record<string, unknown> {
   locked?: boolean;
   // pending job
   taskId?: string;
+  /**
+   * The taskId of the LAST run of this node. `taskId` is cleared when the job
+   * settles; `lastTaskId` is not, so the run log stays readable afterwards.
+   * Purely informational — it never drives the node's status machine.
+   */
+  lastTaskId?: string;
 }
 
 /** Pick only the listed keys from an object; returns null if none are present. */

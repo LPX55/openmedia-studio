@@ -44,13 +44,24 @@ export const useChatStreamingStore = create<ChatStreamingState>()((set, get) => 
     (async () => {
       try {
         const token = await getToken();
+        // The user's custom system prompt (Settings → Assistant) — empty means
+        // the server falls back to the built-in lib/systemPrompt.ts default.
+        const systemPromptOverride = useWorkflowStore.getState().customSystemPrompt.trim();
         const res = await fetch("/api/assistant", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
-          body: JSON.stringify({ model, messages: apiMessages, stream: true, azureEndpoint, azureDeployment, azureModelName }),
+          body: JSON.stringify({
+            model,
+            messages: apiMessages,
+            ...(systemPromptOverride ? { systemPromptOverride } : {}),
+            stream: true,
+            azureEndpoint,
+            azureDeployment,
+            azureModelName,
+          }),
         });
 
         if (!res.ok || !res.body) {

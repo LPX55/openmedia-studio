@@ -7,6 +7,7 @@ import { useAnimatedPopup } from "@/lib/useAnimatedPopup";
 import CornerResizer from "./CornerResizer";
 import { useGeneratingBorderAnimation } from "@/lib/useGeneratingBorderAnimation";
 import { useReadOnly } from "@/lib/readOnlyContext";
+import { isModelEnabled } from "@/lib/providers";
 
 type AssistantNodeType = Node<NodeData, "assistantNode">;
 
@@ -23,6 +24,8 @@ export default function AssistantNode({ id, data, selected }: NodeProps<Assistan
   const insertEdge = useWorkflowStore((s) => s.insertEdge);
   const edges = useWorkflowStore((s) => s.edges);
   const kieKeySet = useWorkflowStore((s) => s.kieKeySet);
+  // Visibility toggles (declutter) — hidden text models are not offered.
+  const disabledModels = useWorkflowStore((s) => s.disabledModels);
 
   const cardRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -377,7 +380,7 @@ export default function AssistantNode({ id, data, selected }: NodeProps<Assistan
 
               {modelPopup.visible && (
                 <div className={`absolute bottom-full left-0 mb-2 w-44 bg-[#111622] border border-[#1E2840] rounded-md overflow-hidden z-[1002] shadow-2xl ${modelPopup.className}`}>
-                  {MODELS.map((m) => (
+                  {MODELS.filter((m) => isModelEnabled(m.id, disabledModels)).map((m) => (
                     <button
                       key={m.id}
                       onMouseDown={(e) => e.stopPropagation()}

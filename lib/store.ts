@@ -4,6 +4,10 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { edgeStyle } from "./edgeStyles";
 import { VIDEO_MODELS } from "./modelConfig";
 import { requestWorkflowSync } from "./workflowSyncBus";
+// TYPE-ONLY import: `lib/providers.ts` imports this store at runtime, so the
+// dependency must not be a runtime edge (it would be a cycle). The `ProviderId`
+// type is erased at compile time.
+import type { ProviderId } from "./providers";
 import {
   Node,
   Edge,
@@ -176,6 +180,19 @@ export interface ProviderPresetInfo {
 }
 
 interface WorkflowStore {
+  // ── Provider/model visibility toggles (declutter) — persisted client-side.
+  //    A disabled provider/model is hidden from every model picker; the
+  //    Settings lists still show it (greyed) so it can be re-enabled.
+  disabledProviders: ProviderId[];
+  disabledModels: string[];
+  setProviderEnabled: (id: ProviderId, enabled: boolean) => void;
+  setModelEnabled: (id: string, enabled: boolean) => void;
+
+  // ── Custom assistant system prompt (client-side, overrides the built-in
+  //    lib/systemPrompt.ts default when non-empty).
+  customSystemPrompt: string;
+  setCustomSystemPrompt: (v: string) => void;
+
   // ── Toasts
   toasts:      Toast[];
   addToast:    (message: string, type?: Toast["type"], href?: string, title?: string, preview?: string) => void;
@@ -496,9 +513,20 @@ export const useWorkflowStore = create<WorkflowStore>()(
             const savedDefaults =
               type === "generateNode"       ? s.nodeDefaults.generateNode :
               type === "videoGeneratorNode" ? s.nodeDefaults.videoGeneratorNode : {};
+            const data = { ...savedDefaults, ...node.data, label };
+            // A hidden model must never be the default of a NEW node: the
+            // remembered last-used model (nodeDefaults / getLastNodeSettings)
+            // and the picker's own defaults are dropped when hidden. The node
+            // then falls back to its own enabled default.
+            if (typeof data.model === "string" && s.disabledModels.includes(data.model)) {
+              delete data.model;
+            }
+            if (typeof data.videoModel === "string" && s.disabledModels.includes(data.videoModel)) {
+              delete data.videoModel;
+            }
             const nodes        = [
               ...s.nodes.map((n) => n.selected ? { ...n, selected: false } : n),
-              { ...node, selected: true, data: { ...savedDefaults, ...node.data, label } },
+              { ...node, selected: true, data },
             ];
             const nodeCounters = { ...s.nodeCounters, [type]: count };
             return {
@@ -745,6 +773,30 @@ export const useWorkflowStore = create<WorkflowStore>()(
         removeToast: (id) =>
           set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
+        // ── Visibility toggles (declutter) ────────────────────────────────
+        disabledProviders: [],
+        disabledModels: [],
+        setProviderEnabled: (id, enabled) =>
+          set((s) => ({
+            disabledProviders: enabled
+              ? s.disabledProviders.filter((p) => p !== id)
+              : s.disabledProviders.includes(id)
+                ? s.disabledProviders
+                : [...s.disabledProviders, id],
+          })),
+        setModelEnabled: (id, enabled) =>
+          set((s) => ({
+            disabledModels: enabled
+              ? s.disabledModels.filter((m) => m !== id)
+              : s.disabledModels.includes(id)
+                ? s.disabledModels
+                : [...s.disabledModels, id],
+          })),
+
+        // ── Custom assistant system prompt (client-side override) ────────
+        customSystemPrompt: "",
+        setCustomSystemPrompt: (v) => set({ customSystemPrompt: v }),
+
         kieKeySet:    null,
         setKieKeySet: (v) => set({ kieKeySet: v }),
 
@@ -818,6 +870,10 @@ export const useWorkflowStore = create<WorkflowStore>()(
         sidebarCollapsed: s.sidebarCollapsed,
         nodeDefaults: s.nodeDefaults,
         lastNodeSize: s.lastNodeSize,
+        // ── Client-side settings (persisted in localStorage) ──────────────
+        disabledProviders: s.disabledProviders,
+        disabledModels: s.disabledModels,
+        customSystemPrompt: s.customSystemPrompt,
       }),
 
       // Migration: v0 had flat nodes/edges/nodeCounters; wrap them in a space
@@ -831,6 +887,10 @@ export const useWorkflowStore = create<WorkflowStore>()(
         if (!state.lastNodeSize) {
           state.lastNodeSize = {};
         }
+        // Ensure the visibility toggles exist for old stored data
+        if (!Array.isArray(state.disabledProviders)) state.disabledProviders = [];
+        if (!Array.isArray(state.disabledModels)) state.disabledModels = [];
+        if (typeof state.customSystemPrompt !== "string") state.customSystemPrompt = "";
         // If there are no spaces (old format), migrate
         if (!state.spaces || state.spaces.length === 0) {
           const sp = makeSpace("Space 1", {

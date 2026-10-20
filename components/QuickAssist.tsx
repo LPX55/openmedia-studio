@@ -6,6 +6,7 @@ import { MODEL_GROUPS, MODELS, type ModelId } from "@/lib/models";
 import { useChatSessionStore } from "@/lib/chatSessionStore";
 import { SYSTEM_PROMPT } from "@/lib/systemPrompt";
 import { useWorkflowStore } from "@/lib/store";
+import { isModelEnabled } from "@/lib/providers";
 import { loadAzureBaseUrl, loadAzureTextDeployment, loadAzureTextModelName } from "@/components/SettingsModal";
 
 interface Message {
@@ -32,6 +33,11 @@ export function QuickAssist() {
 
   const { createSession, upsertSession } = useChatSessionStore();
   const azureKeySet = useWorkflowStore((s) => s.azureKeySet);
+  // The user's custom system prompt (Settings → Assistant). Empty ⇒ the
+  // server falls back to the built-in lib/systemPrompt.ts default.
+  const customSystemPrompt = useWorkflowStore((s) => s.customSystemPrompt);
+  // Visibility toggles (declutter) — hidden text models are not offered.
+  const disabledModels = useWorkflowStore((s) => s.disabledModels);
   const disabledIds = azureKeySet === true ? [] : ["azure-auto"];
 
   // Sync to store when streaming stops
@@ -112,6 +118,7 @@ export function QuickAssist() {
             { role: "system", content: SYSTEM_PROMPT },
             ...newMessages.map(m => ({ role: m.role, content: m.content })),
           ],
+          ...(customSystemPrompt.trim() ? { systemPromptOverride: customSystemPrompt } : {}),
           stream: true,
           thinkingFlag: true,
           max_tokens: 1024,
@@ -166,7 +173,7 @@ export function QuickAssist() {
     } finally {
       setStreaming(false);
     }
-  }, [messages, streaming, model, sessionId, createSession]);
+  }, [messages, streaming, model, sessionId, createSession, customSystemPrompt]);
 
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); }
@@ -291,7 +298,7 @@ export function QuickAssist() {
                         <div key={group.label}>
                           {gi > 0 && <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 0" }} />}
                           <div style={{ padding: "4px 8px 2px", fontSize: "10px", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)" }}>{group.label}</div>
-                          {group.models.map(m => {
+                          {group.models.filter((m) => isModelEnabled(m.id, disabledModels)).map(m => {
                             const isDisabled = disabledIds.includes(m.id);
                             return (
                             <button key={m.id}

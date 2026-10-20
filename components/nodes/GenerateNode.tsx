@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState, Fragment } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import { useAnimatedPopup } from "@/lib/useAnimatedPopup";
 import { createPortal } from "react-dom";
 import GenerateButton from "@/components/nodes/GenerateButton";
@@ -16,7 +16,7 @@ type GenerateNodeType = Node<NodeData, "generateNode">;
 
 import { ShieldBan } from "lucide-react";
 import { IMAGE_MODELS, AZURE_POPULAR_SIZES, validateAzureCustomSize } from "@/lib/modelConfig";
-import { PROVIDERS, getModelProvider, setModelProvider, modelHasProviderChoice, availableProvidersForModel, isModelReady } from "@/lib/providers";
+import { PROVIDERS, getModelProvider, setModelProvider, modelHasProviderChoice, enabledProvidersForModel, isModelReady, isModelEnabled, defaultModelId } from "@/lib/providers";
 import { ProviderBrandIcon, NodeProviderIcon } from "@/components/ui/ProviderIcon";
 import { useGeneratingBorderAnimation } from "@/lib/useGeneratingBorderAnimation";
 import MissingInputWarning from "./MissingInputWarning";
@@ -381,7 +381,18 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
     });
   }, [id, updateNodeData]);
 
-  const model = (data.model as string) ?? "nano-banana-2";
+  // Visibility toggles (declutter) — hidden models/providers are not offered
+  // in the pickers and are never picked as a default. The store subscription
+  // makes the node re-render when a toggle flips.
+  const disabledModels = useWorkflowStore((s) => s.disabledModels);
+  const disabledProviders = useWorkflowStore((s) => s.disabledProviders);
+  const visibleModels = useMemo(
+    () => MODELS.filter((m) => isModelEnabled(m.id, disabledModels)),
+    [disabledModels],
+  );
+
+  // The model's fallback default skips hidden models (declutter).
+  const model = (data.model as string) ?? defaultModelId(IMAGE_MODELS, "nano-banana-2", disabledModels);
   const caps = MODEL_CAPS[model] ?? DEFAULT_CAPS;
   const modelInfo = MODELS.find((m) => m.id === model) ?? MODELS[0];
   const quality = (data.quality as string) ?? "1k";
@@ -391,6 +402,11 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
   // re-render on pref change) — no effect-based state sync needed.
   const currentProvider = getModelProvider(model);
   const isAzureProvider = currentProvider === "azure";
+  /** The backends offered for this model (the current one stays visible). */
+  const providerChoices = useMemo(
+    () => enabledProvidersForModel(model, disabledProviders, currentProvider),
+    [model, disabledProviders, currentProvider],
+  );
   // Design §3.4 readiness: hydrated store decides; pre-hydration passes (the
   // old `kieKeySet === null` semantics).
   const modelReady = isModelReady(model, currentProvider);
@@ -1080,10 +1096,10 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
             </button>
             {modelPopup.visible && (
               <div className={`absolute bottom-full left-0 mb-2 w-48 bg-[#111622] border border-[#1E2840] rounded-md overflow-hidden z-[1002] shadow-2xl ${modelPopup.className}`}>
-                {[...new Set(MODELS.map(m => m.meta))].map((provider, pi) => (
+                {[...new Set(visibleModels.map(m => m.meta))].map((provider, pi) => (
                   <Fragment key={provider}>
                     {pi > 0 && <div className="border-t border-white/[0.06] mx-2 my-0.5" />}
-                    {MODELS.filter(m => m.meta === provider).map(m => (
+                    {visibleModels.filter(m => m.meta === provider).map(m => (
                       <button
                         key={m.id}
                         onMouseDown={(e) => e.stopPropagation()}
@@ -1113,7 +1129,7 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
           </div>
 
           {/* Provider pill — only for models with more than one backend (e.g. GPT Image 2) */}
-          {modelHasProviderChoice(model) && (
+          {modelHasProviderChoice(model) && providerChoices.length >= 2 && (
             <div className="relative shrink-0">
               <button
                 onMouseDown={(e) => e.stopPropagation()}
@@ -1130,7 +1146,7 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
               </button>
               {providerPopup.visible && (
                 <div className={`absolute bottom-full left-0 mb-2 w-36 bg-[#111622] border border-[#1E2840] rounded-md overflow-hidden z-[1002] shadow-2xl ${providerPopup.className}`}>
-                  {availableProvidersForModel(model).map((id) => {
+                  {providerChoices.map((id) => {
                     const p = PROVIDERS.find((q) => q.id === id);
                     if (!p) return null;
                     return (

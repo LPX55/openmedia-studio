@@ -5,6 +5,7 @@ import { useWorkflowStore, NodeData } from "@/lib/store";
 import { edgeStyle, EDGE_COLORS } from "@/lib/edgeStyles";
 import { NODES, NODE_SIZE, FALLBACK_SIZE, NODE_META, getLastNodeSettings, getDefaultNodeSize } from "@/lib/nodeTypes";
 import { VIDEO_MODELS, IMAGE_MODELS } from "@/lib/modelConfig";
+import { isModelEnabled } from "@/lib/providers";
 
 // Extract the aspect ratio as a float from any source node type
 function nodeAspectRatioFloat(data: Record<string, unknown> | undefined): number | null {
@@ -190,7 +191,10 @@ export default function NodePickerMenu({ dropState, onClose }: Props) {
     if (!isInput) {
       const targetHandle = targetHandleFor(dropState.sourceNodeType, type, dropState.sourceHandleId);
       if (type === "videoGeneratorNode" && targetHandle) {
-        const compatible = VIDEO_MODELS.find((m) => (m.handles as string[]).includes(targetHandle));
+        // A hidden model is never the default of a NEW node.
+        const compatible = VIDEO_MODELS.find(
+          (m) => (m.handles as string[]).includes(targetHandle) && isModelEnabled(m.id),
+        );
         if (compatible) {
           extraData.videoModel = compatible.id;
           if (srcRatioFloat !== null) {
@@ -199,7 +203,9 @@ export default function NodePickerMenu({ dropState, onClose }: Props) {
           }
         }
       } else if (type === "generateNode" && srcRatioFloat !== null) {
-        const defaultModel = IMAGE_MODELS.find((m) => m.id === "nano-banana-2") ?? IMAGE_MODELS[0];
+        const defaultModel = IMAGE_MODELS.find((m) => m.id === "nano-banana-2" && isModelEnabled(m.id))
+          ?? IMAGE_MODELS.find((m) => isModelEnabled(m.id))
+          ?? IMAGE_MODELS[0];
         const r = closestRatio(srcRatioFloat, defaultModel.ratios);
         if (r) extraData.aspectRatio = r;
       }

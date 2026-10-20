@@ -53,6 +53,10 @@ const PROVIDER_CATALOG = [
   { id: "replicate",     label: "Replicate" },
   { id: "fal",           label: "fal" },
   { id: "openai-compat", label: "OpenAI Compatible" },
+  // The BYOK chat credential (Settings → Assistant): the user's own key for
+  // assistant/chat requests. It is NOT a generation backend — it never appears
+  // in the model→provider bindings, only in the credential store.
+  { id: "chat",          label: "Chat (BYOK)" },
   // OpenRouter is a BACKEND of the openai-compat family with its own id —
   // its own key row, its own base URL, its own model bindings.
   { id: "openrouter",    label: "OpenRouter" },

@@ -79,6 +79,76 @@ export function setModelProvider(modelId: string, provider: ProviderId) {
   saveModelProviders({ ...map, [modelId]: provider });
 }
 
+// ── Visibility toggles (declutter) ───────────────────────────────────────────
+// The user can hide a provider or a model from every picker (Settings →
+// Models). The toggles live in the client-side store (persisted in
+// localStorage) — they only affect WHICH entries are offered, never the
+// server-side routing of an already-saved workflow.
+//
+// The `disabled*` lists are passed in by the caller so a component that
+// SUBSCRIBES to the store slice re-renders when a toggle flips; the defaults
+// read the store directly for non-reactive call sites.
+
+/** Is this provider enabled? (false once the user hid it in Settings) */
+export function isProviderEnabled(
+  providerId: string,
+  disabledProviders: readonly string[] = useWorkflowStore.getState().disabledProviders,
+): boolean {
+  return !disabledProviders.includes(providerId);
+}
+
+/** Is this model enabled? (false once the user hid it in Settings) */
+export function isModelEnabled(
+  modelId: string,
+  disabledModels: readonly string[] = useWorkflowStore.getState().disabledModels,
+): boolean {
+  return !disabledModels.includes(modelId);
+}
+
+/** Drop the hidden models from a model list (dropdowns / pickers). */
+export function filterEnabledModels<T extends { id: string }>(
+  models: T[],
+  disabledModels: readonly string[] = useWorkflowStore.getState().disabledModels,
+): T[] {
+  return models.filter((m) => isModelEnabled(m.id, disabledModels));
+}
+
+/**
+ * The providers of `modelId` that are still enabled (backend pickers).
+ *
+ * `keep` pins one provider into the list even when it is hidden — the
+ * Settings panel uses it so a model that is currently bound to a hidden
+ * provider still shows that binding (and can be changed away from it).
+ */
+export function enabledProvidersForModel(
+  modelId: string,
+  disabledProviders: readonly string[] = useWorkflowStore.getState().disabledProviders,
+  keep?: string,
+): ProviderId[] {
+  const all = availableProvidersForModel(modelId);
+  const enabled = all.filter((p) => isProviderEnabled(p, disabledProviders));
+  if (keep && !enabled.includes(keep as ProviderId) && all.includes(keep as ProviderId)) {
+    enabled.push(keep as ProviderId);
+  }
+  return enabled;
+}
+
+/**
+ * The model id to use for a DEFAULT (a fresh node / a fresh picker): the
+ * preferred id when it is still enabled, else the first enabled model.
+ *
+ * An EXPLICIT id (a model already saved on a node) is never rewritten — the
+ * toggles only affect what is offered and what is picked by default.
+ */
+export function defaultModelId<T extends { id: string }>(
+  models: T[],
+  preferredId: string,
+  disabledModels: readonly string[] = useWorkflowStore.getState().disabledModels,
+): string {
+  if (isModelEnabled(preferredId, disabledModels)) return preferredId;
+  return models.find((m) => isModelEnabled(m.id, disabledModels))?.id ?? preferredId;
+}
+
 // ── Per-model provider choices (bindingsByModel from GET providers) ─────────
 
 /**

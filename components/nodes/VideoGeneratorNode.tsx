@@ -1,5 +1,5 @@
 "use client";
-import React, { useCallback, useEffect, useRef, useState, Fragment } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import { useAnimatedPopup } from "@/lib/useAnimatedPopup";
 import { createPortal } from "react-dom";
 import GenerateButton from "@/components/nodes/GenerateButton";
@@ -7,7 +7,7 @@ import { Handle, Position, NodeProps, Node, useUpdateNodeInternals } from "@xyfl
 import CornerResizer from "./CornerResizer";
 import NodeActionBar from "./NodeActionBar";
 import { useWorkflowStore, NodeData } from "@/lib/store";
-import { PROVIDERS, getModelProvider, setModelProvider, modelHasProviderChoice, availableProvidersForModel, isModelReady } from "@/lib/providers";
+import { PROVIDERS, getModelProvider, setModelProvider, modelHasProviderChoice, enabledProvidersForModel, isModelReady, isModelEnabled, defaultModelId } from "@/lib/providers";
 import { ProviderBrandIcon, NodeProviderIcon } from "@/components/ui/ProviderIcon";
 import { resolveInputs } from "@/lib/executor";
 import { useReadOnly } from "@/lib/readOnlyContext";
@@ -176,6 +176,10 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
   const providerStatus = useWorkflowStore((s) => s.providerStatus);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const bindingsByModel = useWorkflowStore((s) => s.bindingsByModel);
+  // Visibility toggles (declutter) — hidden models/providers are not offered
+  // in the pickers and are never picked as a default.
+  const disabledModels = useWorkflowStore((s) => s.disabledModels);
+  const disabledProviders = useWorkflowStore((s) => s.disabledProviders);
   const onNodesChange = useWorkflowStore((s) => s.onNodesChange);
   const onEdgesChange = useWorkflowStore((s) => s.onEdgesChange);
   const addNode = useWorkflowStore((s) => s.addNode);
@@ -379,14 +383,25 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
   }, [id, updateNodeData]);
 
   // ── Data ──────────────────────────────────────────────────────────────────
-  const videoModelId = (data.videoModel as string) ?? "kling-3.0";
+  // The model's fallback default skips hidden models (declutter).
+  const videoModelId = (data.videoModel as string) ?? defaultModelId(VIDEO_MODEL_CFG, "kling-3.0", disabledModels);
   const cfg = VIDEO_MODEL_CFG.find((m) => m.id === videoModelId) ?? VIDEO_MODEL_CFG[0];
+  // The models offered in the picker — hidden ones are not selectable.
+  const visibleVideoModels = useMemo(
+    () => VIDEO_MODEL_CFG.filter((m) => isModelEnabled(m.id, disabledModels)),
+    [disabledModels],
+  );
 
   // P5: active provider for this video model (most video models are Kie-only;
   // the pill renders only when the model's binding union has ≥2 entries).
   // Derived from the store at render (modelProviders subscribed above drives
   // re-render on pref change).
   const currentProvider = getModelProvider(videoModelId);
+  /** The backends offered for this model (the current one stays visible). */
+  const providerChoices = useMemo(
+    () => enabledProvidersForModel(videoModelId, disabledProviders, currentProvider),
+    [videoModelId, disabledProviders, currentProvider],
+  );
   // Design §3.4 readiness: hydrated store decides; pre-hydration passes.
   const modelReady = isModelReady(videoModelId, currentProvider);
 
@@ -1787,13 +1802,13 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
                     <ChevronIcon open={modelOpen} />
                   </Pill>
                   <FloatMenu open={modelOpen}>
-                    {[...new Set(VIDEO_MODEL_CFG.map(m => m.provider))].map((provider, pi) => (
+                    {[...new Set(visibleVideoModels.map(m => m.provider))].map((provider, pi) => (
                       <Fragment key={provider}>
                         {pi > 0 && <div style={{ height: "1px", background: "rgba(255,255,255,0.06)", margin: "4px 8px" }} />}
                         <div style={{ padding: "5px 10px 3px", fontSize: "10px", color: "rgba(255,255,255,0.22)", textTransform: "uppercase", letterSpacing: "0.09em", fontWeight: 500 }}>
                           {provider}
                         </div>
-                        {VIDEO_MODEL_CFG.filter(m => m.provider === provider).map(m => (
+                        {visibleVideoModels.filter(m => m.provider === provider).map(m => (
                           <button
                             key={m.id}
                             onMouseDown={(e) => e.stopPropagation()}
@@ -1838,7 +1853,7 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
                 </div>
 
                 {/* Provider pill — any video model with ≥2 bound backends (P5 C7) */}
-                {modelHasProviderChoice(videoModelId) && (
+                {modelHasProviderChoice(videoModelId) && providerChoices.length >= 2 && (
                   <div className="relative">
                     <Pill onClick={() => { setProviderOpen((o) => !o); setModelOpen(false); setRatioOpen(false); setDurOpen(false); setModeOpen(false); setGrokResOpen(false); }}>
                       <span className="flex items-center gap-1.5 text-[11px] text-white/70">
@@ -1848,7 +1863,7 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
                       <ChevronIcon open={providerOpen} />
                     </Pill>
                     <FloatMenu open={providerOpen}>
-                      {availableProvidersForModel(videoModelId).map((id) => {
+                      {providerChoices.map((id) => {
                         const p = PROVIDERS.find((q) => q.id === id);
                         if (!p) return null;
                         return (

@@ -13,6 +13,7 @@ import Image from "next/image";
 import DotCanvasBackground from "@/components/ui/DotCanvasBackground";
 import TypewriterHeading from "@/components/ui/TypewriterHeading";
 import { useWorkflowStore } from "@/lib/store";
+import { isModelEnabled } from "@/lib/providers";
 import { loadAzureBaseUrl, loadAzureTextDeployment, loadAzureTextModelName } from "@/components/SettingsModal";
 
 // ── Logo ──────────────────────────────────────────────────────────────────────
@@ -33,6 +34,8 @@ function ModelPicker({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // Visibility toggles (declutter) — hidden text models are not offered.
+  const disabledModels = useWorkflowStore((s) => s.disabledModels);
 
   useEffect(() => {
     function onPointer(e: PointerEvent) {
@@ -87,7 +90,7 @@ function ModelPicker({
                 <div style={{ padding: "4px 8px 2px", fontSize: "10px", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)" }}>
                   {group.label}
                 </div>
-                {group.models.map(m => {
+                {group.models.filter((m) => isModelEnabled(m.id, disabledModels)).map(m => {
                   const disabled = disabledIds.includes(m.id);
                   return (
                     <button
@@ -313,6 +316,9 @@ function ChatWindow({
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const kieKeySet   = useWorkflowStore((s) => s.kieKeySet);
   const azureKeySet = useWorkflowStore((s) => s.azureKeySet);
+  // The user's custom system prompt (Settings → Assistant). Empty ⇒ the
+  // server falls back to the built-in lib/systemPrompt.ts default.
+  const customSystemPrompt = useWorkflowStore((s) => s.customSystemPrompt);
   const disabledIds = azureKeySet === true ? [] : ["azure-auto"];
 
   function handleModelChange(id: ModelId) { setModel(id); onModelChange?.(id); }
@@ -370,6 +376,7 @@ function ChatWindow({
             { role: "system", content: SYSTEM_PROMPT },
             ...contextMessages.map((m) => ({ role: m.role, content: m.content })),
           ],
+          ...(customSystemPrompt.trim() ? { systemPromptOverride: customSystemPrompt } : {}),
           stream: true,
           ...azureConfig,
         }),
@@ -424,7 +431,7 @@ function ChatWindow({
     } finally {
       setIsStreaming(false);
     }
-  }, [isStreaming, model, onAuthRequired, session, onUpdate]);
+  }, [isStreaming, model, onAuthRequired, session, onUpdate, customSystemPrompt]);
 
   const hasSentInitial = useRef(false);
   useEffect(() => {

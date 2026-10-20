@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { IMAGE_MODELS, VIDEO_MODELS } from "@/lib/modelConfig";
 import { MODEL_GROUPS } from "@/lib/models";
 import { useWorkflowStore } from "@/lib/store";
-import { PROVIDERS, ProviderId, providerMeta, loadModelProviders, saveModelProviders, getModelProvider, getAzureDeployments, getAzureBaseUrl, refreshProviderBootstrap, availableProvidersForModel } from "@/lib/providers";
+import { PROVIDERS, ProviderId, providerMeta, loadModelProviders, saveModelProviders, getModelProvider, getAzureDeployments, getAzureBaseUrl, refreshProviderBootstrap, enabledProvidersForModel } from "@/lib/providers";
 import { ProviderBrandIcon } from "@/components/ui/ProviderIcon";
 
 /* ─── Provider options (re-exported for backwards compat) ───────────────────── */
@@ -106,7 +106,7 @@ export function saveAzureTextModelName(name: string) {
 
 const IS_DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
 
-type NavId = "api-keys" | "image-models" | "video-models" | "text-models" | "debug";
+type NavId = "api-keys" | "image-models" | "video-models" | "text-models" | "assistant" | "debug";
 
 const NAV_BASE: { id: NavId; label: string; icon: React.ReactNode }[] = [
   {
@@ -148,6 +148,17 @@ const NAV_BASE: { id: NavId; label: string; icon: React.ReactNode }[] = [
     icon: (
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      </svg>
+    ),
+  },
+  {
+    id: "assistant",
+    label: "Assistant",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 8V4H8" />
+        <rect width="16" height="12" x="4" y="8" rx="2" />
+        <path d="M2 14h2M20 14h2M9 13v2M15 13v2" />
       </svg>
     ),
   },
@@ -247,6 +258,8 @@ function ModelRow({
   value,
   onChange,
   choices,
+  hidden,
+  onToggleHidden,
 }: {
   id: string;
   name: string;
@@ -256,6 +269,9 @@ function ModelRow({
   onChange: (v: ProviderId) => void;
   /** Providers this model can run on — toggle only when ≥2 (any image OR video model). */
   choices: ProviderId[];
+  /** The model is hidden from every picker (declutter). */
+  hidden: boolean;
+  onToggleHidden: () => void;
 }) {
   return (
     <div
@@ -265,8 +281,9 @@ function ModelRow({
         gap: "14px",
         padding: "11px 16px",
         borderRadius: "10px",
-        background: "rgba(255,255,255,0.02)",
-        border: "1px solid rgba(255,255,255,0.05)",
+        background: hidden ? "rgba(255,255,255,0.01)" : "rgba(255,255,255,0.02)",
+        border: `1px solid ${hidden ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.05)"}`,
+        opacity: hidden ? 0.5 : 1,
       }}
     >
       {/* Labels */}
@@ -283,6 +300,24 @@ function ModelRow({
           }}
         >
           {name}
+          {hidden && (
+            <span
+              style={{
+                marginLeft: "8px",
+                fontSize: "9px",
+                fontWeight: 600,
+                letterSpacing: "0.06em",
+                color: "rgba(251,146,60,0.8)",
+                background: "rgba(251,146,60,0.1)",
+                border: "1px solid rgba(251,146,60,0.2)",
+                borderRadius: "4px",
+                padding: "1px 5px",
+                verticalAlign: "middle",
+              }}
+            >
+              HIDDEN
+            </span>
+          )}
         </div>
         <div
           style={{
@@ -297,6 +332,43 @@ function ModelRow({
 
       {/* Provider toggle — any model (image OR video) with ≥2 bound backends (P5 C7) */}
       {choices.length >= 2 && <ProviderToggle modelId={id} value={value} onChange={onChange} providers={choices} />}
+
+      {/* Visibility toggle — hide a model from every picker */}
+      <button
+        id={`model-visibility-${id}`}
+        onClick={onToggleHidden}
+        title={hidden ? "Show this model in the pickers" : "Hide this model from the pickers"}
+        style={{
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: "5px",
+          padding: "5px 9px",
+          borderRadius: "7px",
+          border: "1px solid rgba(255,255,255,0.1)",
+          background: "rgba(255,255,255,0.04)",
+          color: hidden ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.6)",
+          cursor: "pointer",
+          fontSize: "10px",
+          fontWeight: 500,
+          letterSpacing: "0.04em",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {hidden ? (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 2l20 20" />
+            <path d="M10.6 10.6a2 2 0 0 0 2.8 2.8" />
+            <path d="M9.9 4.2A10.9 10.9 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.2 3.2M6.6 6.6A18.5 18.5 0 0 0 2 12s3 8 10 8a9.8 9.8 0 0 0 5.4-1.6" />
+          </svg>
+        ) : (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 12s3-8 10-8 10 8 10 8-3 8-10 8-10-8-10-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        )}
+        {hidden ? "Show" : "Hide"}
+      </button>
     </div>
   );
 }
@@ -324,6 +396,10 @@ function ModelGroup({
   // (bindingsByModel); availableProvidersForModel() falls back to the static
   // set pre-hydration. The subscription makes the row re-render when GET lands.
   useWorkflowStore((s) => s.bindingsByModel);
+  // Visibility toggles (declutter) — the row re-renders when a model is hidden.
+  const disabledModels = useWorkflowStore((s) => s.disabledModels);
+  const disabledProviders = useWorkflowStore((s) => s.disabledProviders);
+  const setModelEnabled = useWorkflowStore((s) => s.setModelEnabled);
   return (
     <div>
       {/* Group header */}
@@ -345,7 +421,9 @@ function ModelGroup({
               category={m.category}
               value={providers[m.id] ?? "kie"}
               onChange={(v) => onProviderChange(m.id, v)}
-              choices={availableProvidersForModel(m.id)}
+              choices={enabledProvidersForModel(m.id, disabledProviders, providers[m.id])}
+              hidden={disabledModels.includes(m.id)}
+              onToggleHidden={() => setModelEnabled(m.id, disabledModels.includes(m.id))}
             />
             {/* Deployment name — shown only for Azure-capable models when Azure is selected */}
             {m.hasAzureDeployment && (providers[m.id] ?? "kie") === "azure" && (
@@ -1314,16 +1392,44 @@ function ApiKeysPanel({
 /* ─── Provider legend (shared) ───────────────────────────────────────────────── */
 
 function ProviderLegend() {
+  // Visibility toggles (declutter) — a disabled provider is hidden from every
+  // provider picker. The state is global, so both model panels agree.
+  const disabledProviders = useWorkflowStore((s) => s.disabledProviders);
+  const setProviderEnabled = useWorkflowStore((s) => s.setProviderEnabled);
   return (
-    <div style={{ display: "flex", gap: "12px", padding: "12px 16px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "10px" }}>
-      {PROVIDERS.map((p) => (
-        <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ width: "24px", height: "24px", borderRadius: "6px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", fontWeight: 700, color: "rgba(255,255,255,0.55)", letterSpacing: "0.02em" }}>
-            <ProviderBrandIcon id={p.id} />
-          </span>
-          <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", fontWeight: 500 }}>{p.label}</span>
-        </div>
-      ))}
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", padding: "12px 16px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "10px" }}>
+      {PROVIDERS.map((p) => {
+        const hidden = disabledProviders.includes(p.id);
+        return (
+          <button
+            key={p.id}
+            id={`provider-visibility-${p.id}`}
+            onClick={() => setProviderEnabled(p.id, hidden)}
+            title={hidden ? `Show ${p.label} in the provider pickers` : `Hide ${p.label} from the provider pickers`}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              opacity: hidden ? 0.4 : 1,
+              textAlign: "left",
+            }}
+          >
+            <span style={{ width: "24px", height: "24px", borderRadius: "6px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", fontWeight: 700, color: "rgba(255,255,255,0.55)", letterSpacing: "0.02em" }}>
+              <ProviderBrandIcon id={p.id} />
+            </span>
+            <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", fontWeight: 500 }}>{p.label}</span>
+            {hidden && (
+              <span style={{ fontSize: "9px", fontWeight: 600, letterSpacing: "0.06em", color: "rgba(251,146,60,0.8)", background: "rgba(251,146,60,0.1)", border: "1px solid rgba(251,146,60,0.2)", borderRadius: "4px", padding: "1px 5px" }}>
+                HIDDEN
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -1437,6 +1543,10 @@ function TextModelsPanel({
 }) {
   const azureReady = azureKeyStatus === "set" && !!azureBaseUrl.trim();
   const kieGroups = MODEL_GROUPS.filter(g => g.label !== "Azure");
+  // Visibility toggles (declutter) — hidden text models are not offered in the
+  // chat / quick-assist model pickers.
+  const disabledModels = useWorkflowStore((s) => s.disabledModels);
+  const setModelEnabled = useWorkflowStore((s) => s.setModelEnabled);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "28px" }}>
@@ -1461,19 +1571,35 @@ function TextModelsPanel({
               </span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              {group.models.map((m) => (
+              {group.models.map((m) => {
+                const hidden = disabledModels.includes(m.id);
+                return (
                 <div
                   key={m.id}
                   style={{
                     display: "flex", alignItems: "center", gap: "14px",
                     padding: "11px 16px", borderRadius: "10px",
-                    background: "rgba(255,255,255,0.02)",
-                    border: "1px solid rgba(255,255,255,0.05)",
+                    background: hidden ? "rgba(255,255,255,0.01)" : "rgba(255,255,255,0.02)",
+                    border: `1px solid ${hidden ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.05)"}`,
+                    opacity: hidden ? 0.5 : 1,
                   }}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: "13px", fontWeight: 500, color: "rgba(255,255,255,0.85)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {m.label}
+                      {hidden && (
+                        <span
+                          style={{
+                            marginLeft: "8px",
+                            fontSize: "9px", fontWeight: 600, letterSpacing: "0.06em",
+                            color: "rgba(251,146,60,0.8)", background: "rgba(251,146,60,0.1)",
+                            border: "1px solid rgba(251,146,60,0.2)", borderRadius: "4px",
+                            padding: "1px 5px", verticalAlign: "middle",
+                          }}
+                        >
+                          HIDDEN
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: "11px", color: "rgba(255,255,255,0.28)", marginTop: "2px" }}>
                       Kie.ai · {m.desc}
@@ -1489,8 +1615,25 @@ function TextModelsPanel({
                     <span style={{ fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>K</span>
                     Kie.ai
                   </span>
+                  <button
+                    id={`model-visibility-${m.id}`}
+                    onClick={() => setModelEnabled(m.id, hidden)}
+                    title={hidden ? "Show this model in the pickers" : "Hide this model from the pickers"}
+                    style={{
+                      flexShrink: 0,
+                      display: "flex", alignItems: "center", gap: "5px",
+                      padding: "5px 9px", borderRadius: "7px",
+                      border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)",
+                      color: hidden ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.6)",
+                      cursor: "pointer", fontSize: "10px", fontWeight: 500,
+                      letterSpacing: "0.04em", whiteSpace: "nowrap",
+                    }}
+                  >
+                    {hidden ? "Show" : "Hide"}
+                  </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ))}
@@ -1688,6 +1831,296 @@ function DebugPanel() {
             boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
           }} />
         </button>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Assistant panel ────────────────────────────────────────────────────────── */
+
+const CHAT_PROVIDER_ID = "chat";
+
+/**
+ * The Assistant settings: the BYOK chat credential (server-side, via the
+ * provider-credential store) and the custom system prompt (client-side, in
+ * the persisted store).
+ */
+function AssistantPanel() {
+  const customSystemPrompt = useWorkflowStore((s) => s.customSystemPrompt);
+  const setCustomSystemPrompt = useWorkflowStore((s) => s.setCustomSystemPrompt);
+
+  const [keyInput, setKeyInput]       = useState("");
+  const [baseUrlInput, setBaseUrlInput] = useState("");
+  const [savingKey, setSavingKey]     = useState(false);
+  const [savingUrl, setSavingUrl]     = useState(false);
+  const [error, setError]             = useState<string | null>(null);
+  const [keyStatus, setKeyStatus]     = useState<"unknown" | "set" | "unset">("unknown");
+  const [savedBaseUrl, setSavedBaseUrl] = useState("");
+
+  // Read the stored credential status (the provider bootstrap reports
+  // hasKey/baseUrl for every credential row).
+  useEffect(() => {
+    let cancelled = false;
+    void refreshProviderBootstrap().then(() => {
+      if (cancelled) return;
+      const status = useWorkflowStore.getState().providerStatus[CHAT_PROVIDER_ID];
+      setKeyStatus(status?.hasKey ? "set" : "unset");
+      setSavedBaseUrl(status?.baseUrl ?? "");
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const put = async (body: Record<string, unknown>) => {
+    const res = await fetch("/api/settings/providers", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ providerId: CHAT_PROVIDER_ID, ...body }),
+    });
+    if (!res.ok) {
+      const d = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(d.error ?? "Failed to save");
+    }
+    await refreshProviderBootstrap();
+    const status = useWorkflowStore.getState().providerStatus[CHAT_PROVIDER_ID];
+    setKeyStatus(status?.hasKey ? "set" : "unset");
+    setSavedBaseUrl(status?.baseUrl ?? "");
+  };
+
+  const handleSaveKey = async () => {
+    const key = keyInput.trim();
+    if (!key) return;
+    setSavingKey(true);
+    setError(null);
+    try {
+      await put({ apiKey: key });
+      setKeyInput("");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
+  const handleRemoveKey = async () => {
+    setError(null);
+    try {
+      const res = await fetch(`/api/settings/providers?providerId=${CHAT_PROVIDER_ID}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to remove the key");
+      await refreshProviderBootstrap();
+      setKeyStatus("unset");
+      setKeyInput("");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to remove the key");
+    }
+  };
+
+  const handleSaveBaseUrl = async () => {
+    const url = baseUrlInput.trim();
+    if (url === savedBaseUrl) return;
+    setSavingUrl(true);
+    setError(null);
+    try {
+      await put({ baseUrl: url });
+      setBaseUrlInput("");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSavingUrl(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "28px" }}>
+      <div>
+        <h2 style={{ fontSize: "17px", fontWeight: 600, color: "rgba(255,255,255,0.9)", margin: 0, lineHeight: 1.2 }}>
+          Assistant
+        </h2>
+        <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.28)", marginTop: "6px", lineHeight: 1.5 }}>
+          Use your own chat key for the assistant, and override the system prompt it runs with.
+        </p>
+      </div>
+
+      {/* ─── BYOK chat key ─────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+          padding: "16px",
+          background: "rgba(255,255,255,0.02)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: "12px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div>
+            <div style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.85)" }}>Chat API key</div>
+            <div style={{ fontSize: "10px", color: "rgba(255,255,255,0.28)", marginTop: "1px" }}>
+              Your own OpenAI-compatible key for assistant requests
+            </div>
+          </div>
+          {keyStatus === "set" && (
+            <span
+              style={{
+                marginLeft: "auto", fontSize: "10px", fontWeight: 600,
+                color: "rgba(74,222,128,0.8)", background: "rgba(74,222,128,0.08)",
+                border: "1px solid rgba(74,222,128,0.2)", borderRadius: "5px",
+                padding: "2px 7px", letterSpacing: "0.04em",
+              }}
+            >
+              SAVED
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+          <label
+            htmlFor="chat-api-key"
+            style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
+          >
+            API Key
+          </label>
+          {keyStatus === "set" ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <input
+                id="chat-api-key"
+                type="password"
+                value="placeholdertoken"
+                readOnly
+                style={{ ...INPUT_STYLE, flex: 1, cursor: "default", color: "rgba(255,255,255,0.3)" }}
+              />
+              <button
+                onClick={handleRemoveKey}
+                style={{
+                  padding: "7px 12px", borderRadius: "7px", border: "1px solid rgba(239,68,68,0.3)",
+                  background: "rgba(239,68,68,0.06)", color: "rgba(239,68,68,0.7)",
+                  cursor: "pointer", fontSize: "12px", fontWeight: 500, whiteSpace: "nowrap",
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <input
+                  id="chat-api-key"
+                  type="password"
+                  placeholder="Paste your chat API key"
+                  value={keyInput}
+                  onChange={(e) => setKeyInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void handleSaveKey(); }}
+                  style={{ ...INPUT_STYLE, flex: 1 }}
+                  onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"; }}
+                  onBlur={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
+                />
+                <button
+                  onClick={handleSaveKey}
+                  disabled={!keyInput.trim() || savingKey}
+                  style={{
+                    padding: "7px 14px", borderRadius: "7px", border: "none",
+                    background: keyInput.trim() ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
+                    color: keyInput.trim() ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.25)",
+                    cursor: keyInput.trim() ? "pointer" : "default",
+                    fontSize: "12px", fontWeight: 500, whiteSpace: "nowrap",
+                  }}
+                >
+                  {savingKey ? "Saving…" : "Save"}
+                </button>
+              </div>
+              <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", margin: 0, lineHeight: 1.5 }}>
+                Stored on the server — it is never exposed to the browser.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Base URL — optional; defaults to the OpenAI-compatible endpoint */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+          <label
+            htmlFor="chat-base-url"
+            style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
+          >
+            Base URL <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>(optional)</span>
+          </label>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <input
+              id="chat-base-url"
+              type="url"
+              placeholder={savedBaseUrl || "https://api.openai.com/v1"}
+              value={baseUrlInput}
+              onChange={(e) => setBaseUrlInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void handleSaveBaseUrl(); }}
+              style={{ ...INPUT_STYLE, flex: 1 }}
+              onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"; }}
+              onBlur={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
+            />
+            <button
+              onClick={handleSaveBaseUrl}
+              disabled={savingUrl || baseUrlInput.trim() === savedBaseUrl}
+              style={{
+                padding: "7px 14px", borderRadius: "7px", border: "none",
+                background: baseUrlInput.trim() && baseUrlInput.trim() !== savedBaseUrl ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
+                color: baseUrlInput.trim() && baseUrlInput.trim() !== savedBaseUrl ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.25)",
+                cursor: baseUrlInput.trim() && baseUrlInput.trim() !== savedBaseUrl ? "pointer" : "default",
+                fontSize: "12px", fontWeight: 500, whiteSpace: "nowrap",
+              }}
+            >
+              {savingUrl ? "Saving…" : "Save"}
+            </button>
+          </div>
+          <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", margin: 0, lineHeight: 1.5 }}>
+            Any OpenAI-compatible endpoint. Leave empty to use the default.
+          </p>
+        </div>
+
+        {error && (
+          <p style={{ fontSize: "11px", color: "rgba(239,68,68,0.7)", margin: 0 }}>{error}</p>
+        )}
+      </div>
+
+      {/* ─── Custom system prompt ──────────────────────────────────────── */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div>
+            <div style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.85)" }}>System prompt</div>
+            <div style={{ fontSize: "10px", color: "rgba(255,255,255,0.28)", marginTop: "1px" }}>
+              Overrides the built-in prompt for chat &amp; quick assist
+            </div>
+          </div>
+          {customSystemPrompt.trim() && (
+            <button
+              onClick={() => setCustomSystemPrompt("")}
+              style={{
+                marginLeft: "auto", padding: "5px 10px", borderRadius: "6px",
+                border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)",
+                color: "rgba(255,255,255,0.55)", cursor: "pointer",
+                fontSize: "11px", fontWeight: 500, whiteSpace: "nowrap",
+              }}
+            >
+              Reset to default
+            </button>
+          )}
+        </div>
+        <textarea
+          value={customSystemPrompt}
+          onChange={(e) => setCustomSystemPrompt(e.target.value)}
+          placeholder="Leave empty to use the built-in prompt."
+          rows={10}
+          style={{
+            ...INPUT_STYLE,
+            height: "auto",
+            minHeight: "180px",
+            resize: "vertical",
+            lineHeight: 1.5,
+            fontFamily: "inherit",
+          }}
+        />
+        <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", margin: 0, lineHeight: 1.5 }}>
+          Stored in this browser only — it is sent with each chat request and never written to the server.
+        </p>
       </div>
     </div>
   );
@@ -2058,6 +2491,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                 onModelNameChange={handleAzureTextModelNameChange}
               />
             )}
+            {activeNav === "assistant" && <AssistantPanel />}
             {activeNav === "debug" && IS_DEBUG && <DebugPanel />}
           </div>
         </div>

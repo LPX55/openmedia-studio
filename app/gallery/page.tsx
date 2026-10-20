@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, Suspense } fr
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
 import { IMAGE_MODELS, VIDEO_MODELS, AZURE_POPULAR_SIZES, validateAzureCustomSize } from "@/lib/modelConfig";
-import { PROVIDERS, getModelProvider, setModelProvider, modelHasProviderChoice, isAzureConfiguredForModel, isModelReady, availableProvidersForModel } from "@/lib/providers";
+import { PROVIDERS, getModelProvider, setModelProvider, modelHasProviderChoice, isAzureConfiguredForModel, isModelReady, enabledProvidersForModel, isModelEnabled } from "@/lib/providers";
 import { ProviderBrandIcon, NodeProviderIcon } from "@/components/ui/ProviderIcon";
 import { useWorkflowStore } from "@/lib/store";
 import { Maximize2, Minimize2, ShieldAlert, X } from "lucide-react";
@@ -612,6 +612,17 @@ function GalleryInner() {
   const isVideo = tab === "videos";
   const models = isVideo ? VIDEO_MODELS : IMAGE_MODELS;
 
+  // Visibility toggles (declutter) — hidden models/providers are not offered
+  // in the pickers and are never picked as a default.
+  const disabledModels = useWorkflowStore((s) => s.disabledModels);
+  const disabledProviders = useWorkflowStore((s) => s.disabledProviders);
+  const visibleModels = useMemo(
+    () => models.filter((m) => isModelEnabled(m.id, disabledModels)),
+    [models, disabledModels],
+  );
+  /** The model the composer falls back to when nothing (valid) is selected. */
+  const fallbackModelId = visibleModels[0]?.id ?? models[0].id;
+
   const skipNextModelEffect = useRef(false);
 
   const [prompt, setPrompt] = useState<string>(() => loadSettings(tab, selectedFolderId)?.prompt ?? "");
@@ -619,11 +630,11 @@ function GalleryInner() {
   const settingsSnapshotRef = useRef<SavedSettings | null>(null);
   const [modelId, setModelId] = useState<string>(() => {
     const s = loadSettings(tab, selectedFolderId);
-    return (s?.modelId && models.find(m => m.id === s.modelId)) ? s.modelId : models[0].id;
+    return (s?.modelId && models.find(m => m.id === s.modelId)) ? s.modelId : fallbackModelId;
   });
   const [aspectRatio, setAspectRatio] = useState<string>(() => {
     const s = loadSettings(tab, selectedFolderId);
-    const mId = (s?.modelId && models.find(m => m.id === s.modelId)) ? s.modelId : models[0].id;
+    const mId = (s?.modelId && models.find(m => m.id === s.modelId)) ? s.modelId : fallbackModelId;
     const mdl = models.find(m => m.id === mId) ?? models[0];
     const azureOpts = (mdl as { azureResolutionOptions?: string[] }).azureResolutionOptions;
     if (s?.aspectRatio === "custom" && Number.isFinite(s.azureCustomWidth) && Number.isFinite(s.azureCustomHeight) && isAzureActiveForModel(mId, azureOpts)) {
@@ -637,6 +648,11 @@ function GalleryInner() {
   const [quality, setQuality] = useState<string>(() => loadSettings(tab, selectedFolderId)?.quality ?? "2k");
   const [isAzureProvider, setIsAzureProvider] = useState<boolean>(false);
   const [providerId, setProviderId] = useState<ReturnType<typeof getModelProvider>>("kie");
+  /** The backends offered for the active model (the current one stays visible). */
+  const galleryProviderChoices = useMemo(
+    () => enabledProvidersForModel(modelId, disabledProviders, providerId),
+    [modelId, disabledProviders, providerId],
+  );
   const [count, setCount] = useState<number>(() => loadSettings(tab, selectedFolderId)?.count ?? 1);
   const [duration, setDuration] = useState<number>(() => loadSettings(tab, selectedFolderId)?.duration ?? 5);
   const [mode, setMode] = useState<string>(() => loadSettings(tab, selectedFolderId)?.mode ?? "");
@@ -1071,7 +1087,11 @@ function GalleryInner() {
     }
     const newModels = tab === "videos" ? VIDEO_MODELS : IMAGE_MODELS;
     const saved = loadSettings(tab, prevFolderIdRef.current);
-    const model = (saved?.modelId ? newModels.find(m => m.id === saved.modelId) : null) ?? newModels[0];
+    const savedModel = saved?.modelId ? newModels.find(m => m.id === saved.modelId) : null;
+    // A hidden model is never restored — fall back to the first enabled one.
+    const model = (savedModel && isModelEnabled(savedModel.id, disabledModels))
+      ? savedModel
+      : (newModels.find(m => isModelEnabled(m.id, disabledModels)) ?? newModels[0]);
     const azureOpts = (model as { azureResolutionOptions?: string[] }).azureResolutionOptions;
     const savedIsCustom = saved?.aspectRatio === "custom" && Number.isFinite(saved.azureCustomWidth) && Number.isFinite(saved.azureCustomHeight) && isAzureActiveForModel(model.id, azureOpts);
     const savedAR = savedIsCustom ? "custom" : (saved?.aspectRatio && model.ratios.includes(saved.aspectRatio) ? saved.aspectRatio : null);
@@ -1164,6 +1184,8 @@ function GalleryInner() {
     const im = m as { azureQualityOptions?: string[] } | undefined;
     try {
       const provider = getModelProvider(modelId);
+      // The server owns the model→provider binding, so the composer shows the
+      // real backend; hidden providers are only filtered out of the PICKER.
       setProviderId(provider);
       // Provider/base/deployment reads live behind lib/providers.ts (design §4.1).
       const azure    = isAzureConfiguredForModel(modelId) && !!im?.azureQualityOptions;
@@ -1175,6 +1197,14 @@ function GalleryInner() {
     } catch { setIsAzureProvider(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelId, isVideo, modelProviders, providerStatus]);
+
+  // A model hidden in Settings must never stay the composer's active model —
+  // fall back to the first enabled one.
+  useEffect(() => {
+    if (visibleModels.some((m) => m.id === modelId)) return;
+    const next = visibleModels[0]?.id;
+    if (next && next !== modelId) setModelId(next);
+  }, [modelId, visibleModels]);
 
   // Keep refs in sync so the observer callback can gate without needing to be recreated
   useEffect(() => { loadingRef.current = loading; }, [loading]);
@@ -1247,7 +1277,11 @@ function GalleryInner() {
     // Load settings for the new folder
     const saved = loadSettings(tab, selectedFolderId);
     const newModels = tab === "videos" ? VIDEO_MODELS : IMAGE_MODELS;
-    const model = (saved?.modelId ? newModels.find(m => m.id === saved.modelId) : null) ?? newModels[0];
+    const savedModel = saved?.modelId ? newModels.find(m => m.id === saved.modelId) : null;
+    // A hidden model is never restored — fall back to the first enabled one.
+    const model = (savedModel && isModelEnabled(savedModel.id, disabledModels))
+      ? savedModel
+      : (newModels.find(m => isModelEnabled(m.id, disabledModels)) ?? newModels[0]);
     const azureOpts = (model as { azureResolutionOptions?: string[] }).azureResolutionOptions;
     const savedIsCustom = saved?.aspectRatio === "custom" && Number.isFinite(saved.azureCustomWidth) && Number.isFinite(saved.azureCustomHeight) && isAzureActiveForModel(model.id, azureOpts);
     const savedAR = savedIsCustom ? "custom" : (saved?.aspectRatio && model.ratios.includes(saved.aspectRatio) ? saved.aspectRatio : null);
@@ -3993,7 +4027,7 @@ function GalleryInner() {
                   value={modelId}
                   onChange={setModelId}
                   disabled={submitting}
-                  options={models.map(m => ({
+                  options={visibleModels.map(m => ({
                     value: m.id,
                     label: m.name,
                     group: ("provider" in m ? (m as { provider: string }).provider : undefined),
@@ -4003,12 +4037,12 @@ function GalleryInner() {
                 />
 
                 {/* Backend picker — any model with ≥2 bound backends (P5 C7) */}
-                {modelHasProviderChoice(modelId) && (
+                {modelHasProviderChoice(modelId) && galleryProviderChoices.length >= 2 && (
                   <CustomDropdown
                     value={providerId}
                     onChange={(v) => setModelProvider(modelId, v as (typeof PROVIDERS)[number]["id"])}
                     disabled={submitting}
-                    options={availableProvidersForModel(modelId).flatMap((id) => {
+                    options={galleryProviderChoices.flatMap((id) => {
                       const p = PROVIDERS.find((q) => q.id === id);
                       return p ? [{ value: p.id, label: p.label, providerIcon: <ProviderBrandIcon id={p.id} size={14} /> }] : [];
                     })}

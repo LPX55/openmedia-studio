@@ -285,6 +285,11 @@ function envFallbackKey(providerId: string): string | null {
     case "replicate":    return realKey(process.env.REPLICATE_API_TOKEN);
     case "fal":          return realKey(process.env.FAL_KEY);
     case "openai-compat":return realKey(process.env.OPENAI_API_KEY);
+    // The chat BYOK credential (Assistant settings) — an OpenAI-compatible
+    // key the user brought for the assistant. It is stored in
+    // `provider_configs` like every other credential; the env var is only
+    // the fallback when nothing was saved in Settings.
+    case "chat":         return realKey(process.env.CHAT_API_KEY);
     // OpenRouter rides the openai-compat family but keeps its OWN key — the
     // family never shares one key across backends (its binding's `keyEnv`).
     // Listed here so the readiness report and the adapter agree on the key.
@@ -326,6 +331,8 @@ export function getProviderRuntimeConfig(providerId: string): ProviderRuntimeCon
 
   let baseUrl = cfg.baseUrl;
   if (!baseUrl && providerId === "azure") baseUrl = process.env.AZURE_BASE_URL || null;
+  // The chat BYOK credential may point at any OpenAI-compatible endpoint.
+  if (!baseUrl && providerId === "chat") baseUrl = process.env.CHAT_BASE_URL || null;
 
   return { ...cfg, apiKey, baseUrl, keySource };
 }
@@ -581,6 +588,25 @@ export function deleteKieApiToken(): void {
 
 export function getAzureApiKey(): string | null {
   return getProviderRuntimeConfig("azure").apiKey;
+}
+
+/**
+ * The BYOK chat credential (Settings → Assistant) — the user's own key for
+ * assistant/chat requests. Stored in `provider_configs` under the `chat`
+ * provider id; `CHAT_API_KEY` is the env fallback.
+ */
+export function getChatApiKey(): string | null {
+  return getProviderRuntimeConfig("chat").apiKey;
+}
+
+/**
+ * The full BYOK chat credential: the key plus the optional base URL of the
+ * OpenAI-compatible endpoint it belongs to (stored in `provider_configs.base_url`,
+ * `CHAT_BASE_URL` as the env fallback).
+ */
+export function getChatCredential(): { apiKey: string | null; baseUrl: string | null } {
+  const cfg = getProviderRuntimeConfig("chat");
+  return { apiKey: cfg.apiKey, baseUrl: cfg.baseUrl ?? null };
 }
 
 export function setAzureApiKey(key: string): void {

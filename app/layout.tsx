@@ -29,6 +29,10 @@ const doto = Doto({
 export const metadata: Metadata = {
   title: "HeliosGen",
   description: "Build AI image & video generation workflows visually",
+  icons: {
+    icon: [{ url: "/mark.svg", type: "image/svg+xml" }],
+    shortcut: [{ url: "/mark.svg", type: "image/svg+xml" }],
+  },
 };
 
 export const viewport: Viewport = {

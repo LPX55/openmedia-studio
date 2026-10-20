@@ -19,7 +19,7 @@ import { loadAzureBaseUrl, loadAzureTextDeployment, loadAzureTextModelName } fro
 // ── Logo ──────────────────────────────────────────────────────────────────────
 
 function LogoIcon({ size = 40 }: { size?: number }) {
-  return <Image src="/HG.svg" alt="Logo" width={size} height={size} />;
+  return <Image src="/mark.svg" alt="Logo" width={size} height={size} />;
 }
 
 // ── Model picker ──────────────────────────────────────────────────────────────

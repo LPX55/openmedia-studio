@@ -19,18 +19,23 @@ import { edgeStyle } from "./edgeStyles";
 const STRIDE_X = 380;
 const X_OFFSET = 310;
 
+// ── Local placeholder media ──────────────────────────────────────────────────
+// TEMPORARY: the original sample media lived in a public R2 bucket that is no
+// longer reachable (404/401 on every request). These local stand-ins keep the
+// template renderable until real assets are re-hosted; swap the paths for the
+// permanent URLs when they exist.
 const REF_IMAGES = [
-  "https://pub-73a59b956f1c4a7db2934522c13d8027.r2.dev/workflow-template/1.png",
-  "https://pub-73a59b956f1c4a7db2934522c13d8027.r2.dev/workflow-template/2.png",
-  "https://pub-73a59b956f1c4a7db2934522c13d8027.r2.dev/workflow-template/3.png",
-  "https://pub-73a59b956f1c4a7db2934522c13d8027.r2.dev/workflow-template/4.png",
+  "/placeholders/thumb-1.svg",
+  "/placeholders/thumb-2.svg",
+  "/placeholders/thumb-3.svg",
+  "/placeholders/thumb-4.svg",
 ];
 
 const REF_VIDEOS = [
-  "https://pub-73a59b956f1c4a7db2934522c13d8027.r2.dev/workflow-template/1.mp4",
-  "https://pub-73a59b956f1c4a7db2934522c13d8027.r2.dev/workflow-template/2.mp4",
-  "https://pub-73a59b956f1c4a7db2934522c13d8027.r2.dev/workflow-template/3.mp4",
-  "https://pub-73a59b956f1c4a7db2934522c13d8027.r2.dev/workflow-template/4.mp4",
+  "/placeholders/video-1.mp4",
+  "/placeholders/video-2.mp4",
+  "/placeholders/video-3.mp4",
+  "/placeholders/video-4.mp4",
 ];
 
 const IMG_PROMPTS = [
@@ -244,7 +249,7 @@ export function makeUGCTemplate(): {
     data: {
       label:             "Avatar",
       status:            "idle",
-      r2Url:             "https://pub-73a59b956f1c4a7db2934522c13d8027.r2.dev/workflow-template/avatar.png",
+      r2Url:             "/placeholders/avatar.svg",
       imageNaturalRatio: "9 / 16",
     },
   });

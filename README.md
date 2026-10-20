@@ -13,49 +13,41 @@
 
 ---
 
-# ⬇️ Download
+# ▶️ Run it
 
-**HeliosGen is a desktop app.** Grab the latest build for your OS from the
-releases page — no account, no server, no cloud setup:
+HeliosGen is a local-first Next.js app — no account, no server, no cloud setup.
+All you need is Node 22+ (`node:sqlite` powers the local database):
 
-### 👉 **[Download from the Releases page](https://github.com/SegFault42/HeliosGen/releases)**
+```bash
+git clone https://github.com/SegFault42/HeliosGen
+cd HeliosGen
+npm install
+npm run dev
+```
 
-| OS | File |
-| --- | --- |
-| **macOS** (Apple Silicon) | `HeliosGen_<version>_aarch64.dmg` |
-| **Windows** | 🙋 **looking for a contributor to build & submit** — see below |
-| **Linux** | 🙋 **looking for a contributor to build & submit** — see below |
-
-> Only the builds actually attached to the latest release are available. macOS
-> is published today. **Tauri can't cross-compile, so Windows and Linux builds
-> need someone on those platforms** — if you can run `npm run desktop:build` on
-> Windows or Linux (see the **Build from source** section below), please open a
-> PR or attach the artifacts to an issue and we'll add them to the release.
-
-The app is **not code-signed** yet:
-
-- **macOS** — right-click the app → **Open** (once), or run
-  `xattr -cr /Applications/HeliosGen.app`.
-- **Windows** — SmartScreen: **More info → Run anyway**.
+Open http://localhost:3000. For a production build: `npm run build`, then
+`npm start` (respects `PORT`).
 
 ---
 
 ## 🚀 First run
 
 1. Launch HeliosGen.
-2. Open **Settings → API Keys** and paste the API key for the provider you want to use.
-3. Start generating.
+2. Open **Settings → API Keys** and add a key for the provider you want to
+   use — a generation backend (Kie.ai, Azure, OpenRouter, Pollinations, …)
+   and, optionally, a separate chat key for the assistant.
+3. For any **OpenAI-compatible endpoint** (OpenRouter, Pollinations, a
+   self-hosted gateway, …), add it under **Settings → API Keys → Compatible
+   endpoints** with its base URL, key, and a param preset — then bind models
+   to it from the model lists.
+4. Start generating.
 
 Everything stays on your machine. Generations, uploads, folders, workflows and
-settings live in a local database; media is saved to a local folder:
+settings live in a local SQLite database; media is saved to a local folder
+(`data/` and `public/generated/` by default, overridable with
+`HELIOS_DATA_DIR` / `HELIOS_MEDIA_DIR`).
 
-| OS | Data location |
-| --- | --- |
-| macOS | `~/Library/Application Support/cash.sdd.helios.desktop/` |
-| Windows | `%APPDATA%\cash.sdd.helios.desktop\` |
-| Linux | `~/.local/share/cash.sdd.helios.desktop/` |
-
-Delete that folder to reset the app.
+Delete those folders to reset the app.
 
 ---
 
@@ -71,7 +63,7 @@ Delete that folder to reset the app.
 ## 🔄 Workflow Generation
 
 <p align="center">
-  <img width="1459" height="1146" alt="Workflow generation example" src="https://github.com/user-attachments/assets/fc7f1109-76d1-4af0-b91d-0e915bcf5461" />
+  <img width="1459" height="1146" alt="Workflow generation example" src="https://github.com/user-attachments/assets/14619e50-9b8a-4ba0-b911-76d1ebdde8b6" />
 </p>
 
 ---
@@ -107,6 +99,36 @@ No cloud, no accounts — just a local app and your own provider keys.
 
 ---
 
+# 🔌 Providers
+
+HeliosGen talks to generation backends through a pluggable provider registry.
+Built in: **Kie.ai**, **Azure AI Foundry**, **Codex CLI**, plus a generic
+**OpenAI-compatible family** — point it at OpenRouter, Pollinations, a
+self-hosted gateway, or any endpoint that speaks the OpenAI images format,
+and bind catalog models to it. No vendor lock-in: backends are interchangeable
+bindings, not code.
+
+- **Bring your own keys** — per provider, stored locally (SQLite + env-var
+  fallbacks), never leaving your machine except to call the provider itself.
+- **Param presets** — reusable parameter sets (per family/dialect) referenced
+  by bindings instead of hand-filling every model.
+- **Per-model toggles** — hide providers or models you don't use; pickers,
+  the canvas, and the gallery only offer what's enabled.
+- See [`docs/compat-endpoints.md`](docs/compat-endpoints.md) for the
+  compatibility registry (what's verified live vs. docs-only).
+
+# 💬 Assistant
+
+The built-in assistant (canvas QuickAssist, chat page, and generation nodes
+with assistant turns) runs on the chat backend of your choice:
+
+- Add your own chat key under **Settings → Assistant** (BYOK — used in
+  preference to the built-in providers when set).
+- Set a custom system prompt that ships with every assistant request.
+- Model availability follows the same provider toggles as generation.
+
+---
+
 # 💳 Credits
 
 Generation is billed by the provider you configure. Credits are purchased
@@ -131,6 +153,9 @@ You only pay your provider for what you generate.
 - Reference image support
 - Parallel & sequential pipeline execution
 - Real-time generation history
+- Pluggable providers with per-model bindings
+- Provider/model visibility toggles
+- Custom assistant prompts with BYOK chat keys
 - 100% local — your data never leaves your machine
 - Bring your own provider keys
 - Modern responsive UI
@@ -138,6 +163,10 @@ You only pay your provider for what you generate.
 ---
 
 # ⚡ Supported Models
+
+Availability per model depends on the providers you configure — bind models
+to backends in **Settings → Image Models / Video Models**. (Motion-control
+variants currently require the Kie.ai backend.)
 
 ## Images
 - GPT Image 2 (OpenAI)
@@ -161,9 +190,8 @@ More models are coming.
 
 | Layer | Technology |
 |---|---|
-| Desktop shell | Tauri 2 (Rust) |
-| App | Next.js + React + TypeScript (bundled Node sidecar) |
-| Database | SQLite (local) |
+| App | Next.js + React + TypeScript (Node.js server) |
+| Database | SQLite (local, via `node:sqlite`) |
 | Storage | Local disk |
 | AI Backend | Pluggable providers (Kie.ai, Azure AI Foundry, Codex CLI, OpenAI-compatible endpoints) |
 
@@ -171,7 +199,7 @@ More models are coming.
 
 # 🤖 Codex CLI (optional — alternate GPT Image 2 backend)
 
-Instead of routing GPT Image 2 through a hosted generation provider, HeliosGen can generate through your own ChatGPT Codex subscription via [`codex-imagegen-cli`](https://github.com/jdmnk/codex-imagegen-cli). The desktop app picks up `codex` from your `PATH` automatically; if it's missing, the feature just shows **NOT CONFIGURED** and everything else keeps working.
+Instead of routing GPT Image 2 through a hosted generation provider, HeliosGen can generate through your own ChatGPT Codex subscription via [`codex-imagegen-cli`](https://github.com/jdmnk/codex-imagegen-cli). HeliosGen picks up `codex` from your `PATH` automatically; if it's missing, the feature just shows **NOT CONFIGURED** and everything else keeps working.
 
 Requirements:
 - A ChatGPT Plus/Pro/Team/Enterprise account with Codex access
@@ -213,68 +241,17 @@ In **Settings → Image Models**, set GPT Image 2's provider toggle to **Codex C
 
 ---
 
-# 🛠️ Build from source
-
-Prefer to build it yourself, or need a platform that isn't on the releases page
-yet? The whole app builds from this repo.
-
-Tauri does **not** cross-compile — build on the OS you want to target. Run
-`npm run desktop:build` on a Mac for the macOS build, on Windows for Windows,
-on Linux for Linux.
-
-> **Want to help ship Windows / Linux builds?** Build on that OS and send the
-> artifacts (PR or issue attachment) — they'll be added to the next release,
-> with credit.
-
-## Prerequisites (one-time, all platforms)
-
-| Tool | Notes |
-| --- | --- |
-| **Node 22+** | The bundled server uses `node:sqlite`. `nvm use 22`. |
-| **Rust** | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
-| **Tauri system deps** | See <https://v2.tauri.app/start/prerequisites/> |
-
-Platform-specific system deps:
-
-- **macOS** — Xcode Command Line Tools: `xcode-select --install`
-- **Windows** — [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-  (Desktop development with C++) and [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)
-  (preinstalled on Windows 11)
-- **Linux** — `webkit2gtk-4.1`, `librsvg2`, `build-essential`, `curl`, `wget`,
-  `file`, `libssl-dev`, `libayatana-appindicator3-dev` (Debian/Ubuntu package
-  names; see the Tauri prerequisites page for other distros)
-
-## Build
+# 🛠️ Develop
 
 ```bash
 git clone https://github.com/SegFault42/HeliosGen
 cd HeliosGen
 npm install
-npm run desktop:build
+npm run dev
 ```
 
-Artifacts land in `src-tauri/target/release/bundle/`:
-
-| OS | Output |
-| --- | --- |
-| macOS | `macos/HeliosGen.app`, `dmg/HeliosGen_<ver>_<arch>.dmg` |
-| Windows | `msi/HeliosGen_<ver>_x64_en-US.msi`, `nsis/HeliosGen_<ver>_x64-setup.exe` |
-| Linux | `deb/`, `rpm/`, `appimage/HeliosGen_<ver>_amd64.AppImage` |
-
-The macOS build is **unsigned** — on first launch Gatekeeper blocks it.
-Right-click → Open, or `xattr -cr "src-tauri/target/release/bundle/macos/HeliosGen.app"`.
-
-## Develop (hot reload)
-
-```bash
-npm run desktop:dev
-```
-
-Runs `next dev` and `tauri dev` together. The first run compiles the Rust shell
-(~1–2 min).
-
-See [`DESKTOP.md`](DESKTOP.md) for architecture, data locations, and signing &
-notarization.
+Runs the Next.js app with hot reload. `npm run build` + `npm start` (`PORT`
+supported) for a production server.
 
 ---
 
@@ -300,4 +277,3 @@ MIT License
 <p align="center">
   Built for creators building the future of AI workflows.
 </p>
-

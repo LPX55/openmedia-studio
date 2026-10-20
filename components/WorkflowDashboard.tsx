@@ -197,11 +197,12 @@ const CSS = `
 
 // ── Template card ─────────────────────────────────────────────────────────────
 
+// TEMPORARY: local stand-ins for the bundled sample media (see lib/templates.ts).
 const TEMPLATE_PREVIEWS = [
-  "https://pub-73a59b956f1c4a7db2934522c13d8027.r2.dev/workflow-template/1.png",
-  "https://pub-73a59b956f1c4a7db2934522c13d8027.r2.dev/workflow-template/2.png",
-  "https://pub-73a59b956f1c4a7db2934522c13d8027.r2.dev/workflow-template/3.png",
-  "https://pub-73a59b956f1c4a7db2934522c13d8027.r2.dev/workflow-template/4.png",
+  "/placeholders/thumb-1.svg",
+  "/placeholders/thumb-2.svg",
+  "/placeholders/thumb-3.svg",
+  "/placeholders/thumb-4.svg",
 ];
 
 function TemplateCard({ onLoad, onReset }: { onLoad: () => void; onReset: (e: React.MouseEvent) => void }) {

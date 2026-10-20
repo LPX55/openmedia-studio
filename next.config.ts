@@ -27,9 +27,8 @@ const nextConfig: NextConfig = {
   },
   images: {
     remotePatterns: [
-      // Read-only public bucket holding the bundled workflow-template sample media
-      // (lib/templates.ts). Not app storage — just an image CDN allow-list entry.
-      { protocol: "https", hostname: "*.r2.dev" },
+      // The bundled template sample media now ships locally under
+      // public/placeholders (the old public bucket is gone).
       { protocol: "https", hostname: "*.replicate.delivery" },
       { protocol: "https", hostname: "pbxt.replicate.delivery" },
       { protocol: "https", hostname: "*.replicate.com" },

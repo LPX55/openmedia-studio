@@ -650,7 +650,7 @@ const AllAssetsRow = React.memo(function AllAssetsRow({ isActive, count, onSelec
 
 // ── Static icons ──────────────────────────────────────────────────────────────
 function LogoIcon() {
-  return <Image src="/HG.svg" alt="Logo" width={26} height={26} />;
+  return <Image src="/mark.svg" alt="Logo" width={26} height={26} />;
 }
 
 function CreditIcon({ size = 12 }: { size?: number }) {

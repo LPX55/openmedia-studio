@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="270" height="480" viewBox="0 0 270 480" role="img" aria-label="Placeholder thumbnail">
+  <defs>
+    <linearGradient id="t4-bg" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#0B0E14"/>
+      <stop offset="1" stop-color="#141820"/>
+    </linearGradient>
+    <radialGradient id="t4-glow" cx="0.5" cy="0.42" r="0.7">
+      <stop offset="0" stop-color="#2DD4BF" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#2DD4BF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="270" height="480" fill="url(#t4-bg)"/>
+  <rect width="270" height="480" fill="url(#t4-glow)"/>
+  <g fill="#2DD4BF">
+    <rect x="36"  y="212" width="10" height="56"  rx="5" fill-opacity="0.30"/>
+    <rect x="56"  y="188" width="10" height="104" rx="5" fill-opacity="0.38"/>
+    <rect x="76"  y="164" width="10" height="152" rx="5" fill-opacity="0.46"/>
+    <rect x="96"  y="196" width="10" height="88"  rx="5" fill-opacity="0.34"/>
+    <rect x="116" y="148" width="10" height="184" rx="5" fill-opacity="0.54"/>
+    <rect x="136" y="180" width="10" height="120" rx="5" fill-opacity="0.36"/>
+    <rect x="156" y="204" width="10" height="72"  rx="5" fill-opacity="0.28"/>
+    <rect x="176" y="170" width="10" height="140" rx="5" fill-opacity="0.44"/>
+    <rect x="196" y="198" width="10" height="84"  rx="5" fill-opacity="0.32"/>
+    <rect x="216" y="220" width="10" height="40"  rx="5" fill-opacity="0.24"/>
+  </g>
+  <line x1="24" y1="240" x2="246" y2="240" stroke="#2DD4BF" stroke-opacity="0.14" stroke-width="1"/>
+  <text x="24" y="444" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" letter-spacing="0.06em" fill="#2DD4BF" fill-opacity="0.72">nano-banana-pro</text>
+</svg>

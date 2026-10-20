@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="270" height="480" viewBox="0 0 270 480" role="img" aria-label="Placeholder thumbnail">
+  <defs>
+    <linearGradient id="t2-bg" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#0B0E14"/>
+      <stop offset="1" stop-color="#141820"/>
+    </linearGradient>
+    <linearGradient id="t2-band" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2DD4BF" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#2DD4BF" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#2DD4BF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="t2-glow" cx="0.62" cy="0.28" r="0.72">
+      <stop offset="0" stop-color="#2DD4BF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#2DD4BF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="270" height="480" fill="url(#t2-bg)"/>
+  <rect width="270" height="480" fill="url(#t2-glow)"/>
+  <g transform="rotate(-24 135 240)">
+    <rect x="-70" y="150" width="410" height="26" fill="url(#t2-band)"/>
+    <rect x="-70" y="204" width="410" height="10" fill="#2DD4BF" fill-opacity="0.14"/>
+    <rect x="-70" y="256" width="410" height="18" fill="url(#t2-band)" opacity="0.7"/>
+    <rect x="-70" y="302" width="410" height="6" fill="#2DD4BF" fill-opacity="0.1"/>
+  </g>
+  <rect x="24" y="24" width="222" height="432" rx="14" fill="none" stroke="#2DD4BF" stroke-opacity="0.16"/>
+  <text x="24" y="444" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" letter-spacing="0.06em" fill="#2DD4BF" fill-opacity="0.72">nano-banana-pro</text>
+</svg>

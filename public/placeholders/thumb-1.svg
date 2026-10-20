@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="270" height="480" viewBox="0 0 270 480" role="img" aria-label="Placeholder thumbnail">
+  <defs>
+    <linearGradient id="t1-bg" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#0B0E14"/>
+      <stop offset="1" stop-color="#141820"/>
+    </linearGradient>
+    <radialGradient id="t1-glow" cx="0.5" cy="0.3" r="0.72">
+      <stop offset="0" stop-color="#2DD4BF" stop-opacity="0.26"/>
+      <stop offset="0.55" stop-color="#2DD4BF" stop-opacity="0.07"/>
+      <stop offset="1" stop-color="#2DD4BF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="270" height="480" fill="url(#t1-bg)"/>
+  <rect width="270" height="480" fill="url(#t1-glow)"/>
+  <g fill="none" stroke="#2DD4BF">
+    <circle cx="135" cy="212" r="44" stroke-opacity="0.38"/>
+    <circle cx="135" cy="212" r="70" stroke-opacity="0.22"/>
+    <circle cx="135" cy="212" r="96" stroke-opacity="0.12"/>
+  </g>
+  <circle cx="135" cy="212" r="15" fill="#2DD4BF" fill-opacity="0.6"/>
+  <text x="24" y="444" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" letter-spacing="0.06em" fill="#2DD4BF" fill-opacity="0.72">nano-banana-pro</text>
+</svg>

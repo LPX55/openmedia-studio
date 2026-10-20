@@ -7,12 +7,12 @@
  * `@/lib/providers/bootstrap` (and jobManager imports `./providers/bootstrap`).
  *
  * Registers the built-in adapters (KieProvider, AzureFoundryProvider,
- * CodexCliProvider) into the registry exactly once per server process.
- * Controllers import THIS module (its side effects do the registration) and
- * the re-exported registry API — they NEVER import individual adapters, so a
- * future adapter (Phase 6: replicate / fal / openai-compat) only touches this
- * file. Phase-6 custom-endpoint adapters will register from their own code
- * paths via `register()`.
+ * CodexCliProvider, OpenAICompatProvider) into the registry exactly once per
+ * server process. Controllers import THIS module (its side effects do the
+ * registration) and the re-exported registry API — they NEVER import
+ * individual adapters, so a future adapter only touches this file.
+ * The openai-compat family adapter additionally serves its backend ids
+ * ("openrouter", …) through `aliases` (compat-plan §b).
  *
  * SERVER-ONLY: importing this pulls in the adapters (node:child_process,
  * node:https, kieUpload, guest paths) — never import it from client code.
@@ -21,6 +21,7 @@ import { register } from "./registry";
 import { kieProvider } from "./adapters/kie";
 import { azureProvider } from "./adapters/azure";
 import { codexProvider } from "./adapters/codex";
+import { openaiCompatProvider } from "./adapters/openaiCompat";
 
 let registered = false;
 
@@ -30,6 +31,7 @@ export function registerBuiltinProviders(): void {
   register(kieProvider);
   register(azureProvider);
   register(codexProvider);
+  register(openaiCompatProvider);
   registered = true;
 }
 

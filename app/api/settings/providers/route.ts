@@ -13,7 +13,10 @@ import {
   deleteProviderModelBindings,
 } from "@/lib/guest/db";
 import { IMAGE_MODELS, VIDEO_MODELS } from "@/lib/modelConfig";
-import { getAvailableProvidersForModel } from "@/lib/providers/bindings";
+import { getAvailableProvidersForModel, getOpenRouterBinding, OPENROUTER_BASE_URL } from "@/lib/providers/bindings";
+// The registry (side-effect registration + the adapter's own `checkReadiness`)
+// — controllers import the BOOTSTRAP module, never an adapter directly.
+import { get as getRegisteredProvider } from "@/lib/providers/bootstrap";
 
 /**
  * Phase 3 — unified provider credential/config store (design.md §3.3).
@@ -40,6 +43,9 @@ const PROVIDER_CATALOG = [
   { id: "replicate",     label: "Replicate" },
   { id: "fal",           label: "fal" },
   { id: "openai-compat", label: "OpenAI Compatible" },
+  // OpenRouter is a BACKEND of the openai-compat family with its own id —
+  // its own key row, its own base URL, its own model bindings.
+  { id: "openrouter",    label: "OpenRouter" },
 ] as const;
 
 type ProviderId = (typeof PROVIDER_CATALOG)[number]["id"];
@@ -52,28 +58,51 @@ interface ProviderReadiness {
   baseUrl: string | null;
   deployments: Record<string, string>;
   ready: boolean;
+  /** Why the provider is not ready (adapter `checkReadiness` reason). */
+  reason?: string;
 }
 
 export async function GET() {
+  // The OpenRouter backend of the openai-compat family. Its readiness is
+  // decided by the ADAPTER itself (`checkReadiness`) so the report can never
+  // disagree with what the generation path will do (compat-plan §b).
+  const orProvider = getRegisteredProvider("openrouter");
+  const orBinding = getOpenRouterBinding();
+
   const providers: Record<string, ProviderReadiness> = {};
   for (const p of PROVIDER_CATALOG) {
     const cfg = getProviderRuntimeConfig(p.id);
     const deployments = (cfg.extra.deployments as Record<string, string> | undefined) ?? {};
     const hasKey = p.id === "codex" ? cfg.keySource === "cli" : !!cfg.apiKey;
-    // Azure mirrors today's `if (azureBaseUrl && azureDeployment)` gate — not
-    // ready without a base URL and at least one deployment (finding 1ii).
-    const ready =
-      p.id === "azure"
-        ? hasKey && !!cfg.baseUrl && Object.keys(deployments).length > 0
-        : hasKey;
+    let baseUrl: string | null = cfg.baseUrl;
+    let ready: boolean;
+    let reason: string | undefined;
+
+    if (p.id === "azure") {
+      // Azure mirrors today's `if (azureBaseUrl && azureDeployment)` gate — not
+      // ready without a base URL and at least one deployment (finding 1ii).
+      ready = hasKey && !!cfg.baseUrl && Object.keys(deployments).length > 0;
+    } else if (p.id === "openrouter") {
+      // The compat family PINS its base URL on the binding (a code-seeded
+      // backend carries its own), so the effective base URL is the binding's —
+      // a stored `provider_configs.base_url` row never overrides it.
+      baseUrl = orBinding?.baseUrl ?? OPENROUTER_BASE_URL;
+      const check = orProvider?.checkReadiness(cfg, orBinding);
+      ready = check?.ready ?? hasKey;
+      reason = check?.reason;
+    } else {
+      ready = hasKey;
+    }
+
     providers[p.id] = {
       id: p.id,
       label: p.label,
       hasKey,
       keySource: cfg.keySource,
-      baseUrl: cfg.baseUrl,
+      baseUrl,
       deployments,
       ready,
+      ...(reason ? { reason } : {}),
     };
   }
 

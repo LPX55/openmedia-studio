@@ -197,6 +197,18 @@ export interface GenerationProvider {
   readonly id: ProviderId;
   readonly label: string;
   /**
+   * Additional provider ids this adapter serves (compat-plan §b).
+   *
+   * The `openai-compat` family is ONE adapter for many OpenAI-speaking
+   * backends. Each backend keeps its OWN provider id ("openrouter", later
+   * "pollinations", …) so it can carry its own key row (`provider_configs`),
+   * its own base URL and its own `model_bindings` rows (PK
+   * `(model_id, provider_id)`). The registry registers an id-overridden view
+   * per alias, so `provider.id` — which the job manager uses for credential
+   * resolution and the generation row's `provider_id` — stays the BACKEND id.
+   */
+  readonly aliases?: readonly ProviderId[];
+  /**
    * Provider-level DEFAULT media staging — always overridable per binding and
    * per operation via `resolveMediaStagingStrategy()` (finding 1i).
    */

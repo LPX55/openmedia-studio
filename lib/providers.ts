@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // PROVIDERS — single source of truth for per-model backend selection
-// (Kie.ai / Azure Foundry / Codex CLI), shared by the Settings modal, the
-// workflow GenerateNode, and the gallery generation composer.
+// (Kie.ai / Azure Foundry / Codex CLI / OpenRouter), shared by the Settings
+// modal, the workflow GenerateNode, and the gallery generation composer.
 //
 // Phase 5 (C8 / design §3.4): the zustand store is the backing store —
 // hydrated from `GET /api/settings/providers` (AppSidebar) and written back
@@ -15,12 +15,35 @@ import { IMAGE_MODELS } from "@/lib/modelConfig";
 import { useWorkflowStore } from "@/lib/store";
 
 export const PROVIDERS = [
-  { id: "kie",   label: "Kie.ai" },
-  { id: "azure", label: "Azure Foundry" },
-  { id: "codex", label: "Codex CLI" },
+  { id: "kie",        label: "Kie.ai" },
+  { id: "azure",      label: "Azure Foundry" },
+  { id: "codex",      label: "Codex CLI" },
+  // OpenRouter rides the openai-compat family (P6 step 1) but keeps its OWN
+  // provider id — it carries its own key row, base URL and model bindings.
+  { id: "openrouter", label: "OpenRouter" },
 ] as const;
 
-export type ProviderId = (typeof PROVIDERS)[number]["id"];
+/**
+ * Provider ids the client understands.
+ *
+ * The known ids come from `PROVIDERS`; the `(string & {})` tail keeps the type
+ * OPEN for ids only the SERVER knows (another compat backend alias, a
+ * user-defined `model_bindings` row). The per-model provider union the server
+ * sends (`bindingsByModel`) is DATA, not a closed enum — the client must never
+ * assume a fixed provider set (P6 step 2: a 4th provider id crashed every
+ * `PROVIDERS.find(...)!` call site).
+ */
+export type ProviderId = (typeof PROVIDERS)[number]["id"] | (string & {});
+
+/**
+ * Display metadata for a provider id — a KNOWN id yields its label, an unknown
+ * one (server-only backend) degrades to the raw id instead of crashing a
+ * `find()!` call site.
+ */
+export function providerMeta(id: string): { id: string; label: string } {
+  const known = (PROVIDERS as readonly { id: string; label: string }[]).find((p) => p.id === id);
+  return known ?? { id, label: id };
+}
 
 // ── Model → provider preference (was localStorage `aiui-model-providers`) ────
 
@@ -69,7 +92,7 @@ export function modelHasProviderChoice(modelId: string): boolean {
 export function availableProvidersForModel(modelId: string): ProviderId[] {
   const { bindingsByModel, providersHydrated } = useWorkflowStore.getState();
   const fromServer = bindingsByModel[modelId];
-  if (fromServer?.length) return fromServer as ProviderId[];
+  if (fromServer?.length) return fromServer;
   if (providersHydrated) return ["kie"]; // hydrated with no row ⇒ static set said kie-only
   // Pre-hydration fallback — the old MULTI_PROVIDER set (azure-capable images).
   return MULTI_PROVIDER_MODEL_IDS.has(modelId) ? ["kie", "azure", "codex"] : ["kie"];
@@ -93,6 +116,8 @@ function readinessReason(providerId: ProviderId): string {
       return "Azure Foundry is not configured — add its API key, base URL, and a model deployment in Settings.";
     case "codex":
       return "Codex CLI is not configured — run `codex login` on this machine.";
+    case "openrouter":
+      return "OpenRouter is not configured — add its API key in Settings (or set OPENROUTER_API_KEY).";
     default:
       return "No Kie.ai API key configured. Add one in Settings.";
   }

@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { IMAGE_MODELS, VIDEO_MODELS } from "@/lib/modelConfig";
 import { MODEL_GROUPS } from "@/lib/models";
 import { useWorkflowStore } from "@/lib/store";
-import { PROVIDERS, ProviderId, loadModelProviders, saveModelProviders, getModelProvider, getAzureDeployments, getAzureBaseUrl, refreshProviderBootstrap, availableProvidersForModel } from "@/lib/providers";
+import { PROVIDERS, ProviderId, providerMeta, loadModelProviders, saveModelProviders, getModelProvider, getAzureDeployments, getAzureBaseUrl, refreshProviderBootstrap, availableProvidersForModel } from "@/lib/providers";
 import { ProviderBrandIcon } from "@/components/ui/ProviderIcon";
 
 /* ─── Provider options (re-exported for backwards compat) ───────────────────── */
@@ -200,8 +200,11 @@ function ProviderToggle({
         flexShrink: 0,
       }}
     >
-      {(providers.length >= 2 ? providers : PROVIDERS).map((id) => {
-        const p = PROVIDERS.find((q) => q.id === id)!;
+      {(providers.length >= 2 ? providers : PROVIDERS.map((p) => p.id)).map((id) => {
+        // `providers` is the SERVER's per-model union — it may name a backend
+        // this bundle doesn't know (another compat alias). `providerMeta()`
+        // degrades to the raw id instead of the old `find(...)!` crash.
+        const p = providerMeta(id);
         const active = value === p.id;
         return (
           <button

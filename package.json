@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start -p ${PORT:-3000}",
     "lint": "eslint",
+    "smoke:providers": "node scripts/providers/smoke-compat.mjs",
     "desktop:dev": "node scripts/desktop/dev.mjs",
     "desktop:check-version": "node scripts/desktop/check-version.mjs",
     "desktop:build": "node scripts/desktop/check-version.mjs && CI=true tauri build",

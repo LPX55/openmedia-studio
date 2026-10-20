@@ -284,6 +284,10 @@ function envFallbackKey(providerId: string): string | null {
     case "replicate":    return realKey(process.env.REPLICATE_API_TOKEN);
     case "fal":          return realKey(process.env.FAL_KEY);
     case "openai-compat":return realKey(process.env.OPENAI_API_KEY);
+    // OpenRouter rides the openai-compat family but keeps its OWN key — the
+    // family never shares one key across backends (its binding's `keyEnv`).
+    // Listed here so the readiness report and the adapter agree on the key.
+    case "openrouter":   return realKey(process.env.OPENROUTER_API_KEY);
     default:             return null;
   }
 }

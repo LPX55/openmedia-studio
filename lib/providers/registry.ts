@@ -21,9 +21,19 @@ import type { GenerationProvider, ProviderId, ProviderRuntimeConfig } from "./ty
 
 const providers = new Map<ProviderId, GenerationProvider>();
 
-/** Registers (or replaces, e.g. on hot-reload) the adapter for its `id`. */
+/**
+ * Registers (or replaces, e.g. on hot-reload) the adapter for its `id`.
+ *
+ * Family adapters (compat-plan §b) declare the BACKEND ids they serve via
+ * `aliases`; each alias is registered as an id-overridden VIEW of the same
+ * adapter, so `provider.id` — the id the job manager resolves credentials
+ * and writes into `generations.provider_id` with — stays the backend id.
+ */
 export function register(provider: GenerationProvider): void {
   providers.set(provider.id, provider);
+  for (const alias of provider.aliases ?? []) {
+    providers.set(alias, { ...provider, id: alias });
+  }
 }
 
 /** The registered adapter, or `undefined` when no adapter has registered for `providerId` yet. */
@@ -111,7 +121,7 @@ export function resolveForModel(
   }
   const binding: ModelProviderBinding = { ...merged, upstreamModelId: merged.upstreamModelId };
 
-  const provider = providers.get(providerId);
+  const provider = get(providerId);
   if (!provider) {
     throw new Error(
       `resolveForModel: provider "${providerId}" is not registered — adapters register in P4b (lib/providers/adapters/*)`,

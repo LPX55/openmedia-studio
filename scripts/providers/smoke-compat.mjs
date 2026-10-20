@@ -230,7 +230,7 @@ async function main() {
   // ── 2. Bindings ───────────────────────────────────────────────────────────
   section("static OpenRouter bindings");
   const orBindings = BUILT_IN_BINDINGS.filter((b) => b.providerId === "openrouter");
-  eq("10 OpenRouter image bindings are code-defined", orBindings.length, 10);
+  eq("12 OpenRouter image bindings are code-defined", orBindings.length, 12);
   const representative = getOpenRouterBinding();
   ok("a representative OpenRouter binding resolves", !!representative);
   eq("the representative binding is an OpenRouter one", representative?.providerId, "openrouter");

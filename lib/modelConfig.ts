@@ -380,6 +380,45 @@ export const IMAGE_MODELS: ImageModel[] = [
       promptMaxLength: 20000,
     },
   },
+  {
+    id: "qwen-image-2.1-turbo",
+    // kie.ai actually serves qwen2-1 (unlike most OR-only models), so the
+    // auto-derived kie binding is real, not a placeholder.
+    apiId: "qwen2-1/image-to-video",
+    textOnlyApiId: "qwen2-1/text-to-image",
+    name: "Qwen Image 2.1 Turbo",
+    provider: "Qwen",
+    ratios: ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+    supportsImages: true,
+    // OR caps input_references at 4; kie slices to this anyway.
+    maxImages: 4,
+    supportsQuality: true,
+    apiInput: {
+      aspectRatioKey: "aspect_ratio",
+      imageInputKey: "image_urls",
+      qualityKey: "resolution",
+      qualityOptions: ["1k", "2k"],
+      promptMaxLength: 3000,
+    },
+  },
+  {
+    id: "qwen-image-2.1-pro",
+    apiId: "qwen2-1-pro/image-to-video",
+    textOnlyApiId: "qwen2-1-pro/text-to-image",
+    name: "Qwen Image 2.1 Pro",
+    provider: "Qwen",
+    ratios: ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+    supportsImages: true,
+    maxImages: 4,
+    supportsQuality: true,
+    apiInput: {
+      aspectRatioKey: "aspect_ratio",
+      imageInputKey: "image_urls",
+      qualityKey: "resolution",
+      qualityOptions: ["1k", "2k"],
+      promptMaxLength: 3000,
+    },
+  },
 ];
 
 // ── Video models ──────────────────────────────────────────────────────────────

@@ -49,6 +49,7 @@ export type VideoPayloadFamily =
  *  - "width"        — the custom pixel WIDTH (a number, not "WxH")
  *  - "height"       — the custom pixel HEIGHT (a number, not "WxH")
  *  - "seed"         — the seed
+ *  - "seedBoolean"  — randomize flag for boolean-`seed` dialects (absent numeric seed ⇒ true; explicit numeric seed has no upstream representation ⇒ false)
  *  - "references"   — the staged reference images
  *  - "outputFormat" — the catalog's declared output format
  */
@@ -62,6 +63,7 @@ export type CompatFieldSource =
   | "width"
   | "height"
   | "seed"
+  | "seedBoolean"
   | "references"
   | "outputFormat";
 
@@ -518,6 +520,43 @@ const openRouterImageBindings: ModelProviderBinding[] = [
       fields: { ...OR_IMAGE_FIELDS, quality: "tier" },
       valueMaps: { quality: { "1k": "low", "2k": "medium", "4k": "high" } },
       maxReferences: 16,
+    },
+  },
+
+  // qwen-image-2.1-turbo → OR "qwen/qwen-image-2.1-turbo" (verified live
+  // 2026-10-26: sole provider alibaba; seed is BOOLEAN randomize flag,
+  // $0.0184 flat at 1K+2K). seedBoolean maps absent seed ⇒ true; an
+  // explicit numeric seed has no upstream representation ⇒ false.
+  {
+    modelId: "qwen-image-2.1-turbo",
+    providerId: "openrouter",
+    upstreamModelId: "qwen/qwen-image-2.1-turbo",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_IMAGE_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    paramMap: {
+      fields: { ...OR_IMAGE_FIELDS, resolution: "tier", seed: "seedBoolean" },
+      valueMaps: { resolution: { "1k": "1K", "2k": "2K" } },
+      maxReferences: 4,
+    },
+  },
+
+  // qwen-image-2.1-pro → OR "qwen/qwen-image-2.1-pro" — 2.5x quality tier
+  // ($0.046), same boolean-seed dialect and caps as turbo (assumed from the
+  // shared family schema; re-verify against /images/models if it 400s).
+  {
+    modelId: "qwen-image-2.1-pro",
+    providerId: "openrouter",
+    upstreamModelId: "qwen/qwen-image-2.1-pro",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_IMAGE_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    paramMap: {
+      fields: { ...OR_IMAGE_FIELDS, resolution: "tier", seed: "seedBoolean" },
+      valueMaps: { resolution: { "1k": "1K", "2k": "2K" } },
+      maxReferences: 4,
     },
   },
 ];

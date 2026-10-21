@@ -411,6 +411,12 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
   const resolution = (data.grokResolution as string) ?? cfg.defaultResolution ?? "";
   const duration = (data.duration as number) ?? cfg.defaultDuration;
   const aspectRatio = (data.aspectRatio as string) ?? cfg.defaultRatio;
+  // Some models (e.g. seedance-2-5-edit) only expose adaptive framing, which is
+  // not a CSS aspect-ratio. Fall back to 16:9 so the card keeps a height —
+  // otherwise the node collapses to a hairline and its controls disappear.
+  const ratioCss = /^\d+\s*:\s*\d+$/.test(aspectRatio)
+    ? aspectRatio.replace(":", " / ")
+    : "16 / 9";
   const sound = (data.sound as boolean) ?? false;
   const seed = (data.seed as number | undefined) ?? 0;
   const status = (data.status as string) ?? "idle";
@@ -1199,7 +1205,7 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
       className={`video-node-card node-card w-full${animBusy ? " node-generating" : ""}${isQueued ? " node-queued" : ""}${(data.hasError as boolean) ? " node-error-blink" : ""}`}
       style={{
         minWidth: 320,
-        aspectRatio: (data.imageNaturalRatio as string | undefined) ?? aspectRatio.replace(":", " / "),
+        aspectRatio: (data.imageNaturalRatio as string | undefined) ?? ratioCss,
       }}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={closeAll}
@@ -1344,7 +1350,7 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
       <div
         className="relative bg-[#2a2d35] group/player group/gen"
         style={{
-          aspectRatio: (data.imageNaturalRatio as string | undefined) ?? aspectRatio.replace(":", " / "),
+          aspectRatio: (data.imageNaturalRatio as string | undefined) ?? ratioCss,
           width: "100%",
           transition: "aspect-ratio 0.35s cubic-bezier(0.4, 0, 0.2, 1)",
         }}

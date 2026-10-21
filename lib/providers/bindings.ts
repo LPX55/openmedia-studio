@@ -164,6 +164,19 @@ export interface CompatMediaUpload {
   headers?: Record<string, string>;
   /** Extra non-file multipart fields. */
   fields?: Record<string, string>;
+  /**
+   * Provider id whose runtime key authenticates the upload (the stored DB key
+   * first, then that provider's env fallback — resolved by
+   * `getProviderRuntimeConfig`). When absent, the existing behavior holds: the
+   * generation-target backend's own key authenticates the upload.
+   *
+   * CROSS-PROVIDER upload: the endpoint belongs to ANOTHER provider than the
+   * one that generates (e.g. the OpenRouter video lane documents NO upload
+   * endpoint of its own, so its local frames are staged through the
+   * Pollinations media store) — the generation backend's key would NOT
+   * authenticate that host.
+   */
+  keyProviderId?: string;
 }
 
 /**
@@ -783,6 +796,28 @@ const openRouterImageBindings: ModelProviderBinding[] = [
   },
 ];
 
+// ── Cross-provider media store (shared by the Pollinations + OpenRouter lanes) ──
+
+/**
+ * Pollinations' MEDIA STORE upload endpoint — a SIBLING host of the generation
+ * base URL (findings §3: `POST https://media.pollinations.ai/upload`;
+ * multipart / raw / base64, ≤400 MiB, 30-day lifecycle).
+ *
+ * SHARED by two lanes:
+ *  - the Pollinations image bindings, whose backend takes reference images as
+ *    URLs (a local file has to be uploaded to the media store first — a
+ *    data-url in the request body is impractical), and
+ *  - the OpenRouter VIDEO bindings, which document NO upload endpoint of
+ *    their own: their local frames are staged through this store as a
+ *    CROSS-PROVIDER upload, authenticated with the POLLINATIONS key
+ *    (`mediaUpload.keyProviderId`), not with the OpenRouter one.
+ *
+ * Declared HERE (before the OpenRouter video bindings) because that array is
+ * a module-level literal — a later declaration would be in the temporal dead
+ * zone when the array is evaluated.
+ */
+export const POLLINATIONS_MEDIA_UPLOAD_URL = "https://media.pollinations.ai/upload";
+
 // ── OpenRouter VIDEO dialect (compat-plan §b; sweep 2026-10-21) ──────────────
 
 /**
@@ -830,10 +865,15 @@ const OR_VIDEO_FIELDS = {
  * Two rules shape every binding:
  *
  *  - REFERENCES ARE HTTPS-URLS ONLY. The video endpoint takes no `data:` URI
- *    and OpenRouter documents NO upload endpoint ⇒ the binding stages media as
- *    "remote-url": an already-public URL passes through, a LOCAL file has to be
- *    uploaded first (the family's `uploadMedia` hook fails LOUDLY — a silently
- *    dropped reference is worse than a surfaced error).
+ *    and OpenRouter documents NO upload endpoint of its own ⇒ the binding
+ *    stages media as "remote-url": an already-public URL passes through, a
+ *    LOCAL file has to be uploaded first. The upload itself is CROSS-PROVIDER
+ *    — the bytes go to the Pollinations MEDIA STORE
+ *    (`media.pollinations.ai/upload`), authenticated with the POLLINATIONS key
+ *    (`mediaUpload.keyProviderId`), because OpenRouter's own key does not
+ *    authenticate that host. A missing Pollinations key fails LOUDLY (the
+ *    family's `uploadMedia` hook) — a silently dropped reference is worse than
+ *    a surfaced error.
  *  - THE CATALOG ENTRY IS THE SOURCE OF THE CAPS. The binding re-clamps the
  *    duration to the model's own limits and drops the tiers the upstream enum
  *    rejects (the "auto" ratio / an unsupported resolution) instead of sending
@@ -859,6 +899,16 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
     pathOverride: OPENROUTER_VIDEO_PATH,
     keyEnv: OPENROUTER_KEY_ENV,
     mediaStaging: "remote-url",
+    // CROSS-PROVIDER upload: OpenRouter documents no upload endpoint of its
+    // own, so a LOCAL frame is staged through the Pollinations media store —
+    // authenticated with the POLLINATIONS key (`keyProviderId`), not with the
+    // OpenRouter one (the two backends never share a key).
+    mediaUpload: {
+      url: POLLINATIONS_MEDIA_UPLOAD_URL,
+      field: "file",
+      encoding: "multipart",
+      keyProviderId: "pollinations",
+    },
     paramMap: {
       fields: {
         prompt: OR_VIDEO_FIELDS.prompt,
@@ -896,6 +946,16 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
     pathOverride: OPENROUTER_VIDEO_PATH,
     keyEnv: OPENROUTER_KEY_ENV,
     mediaStaging: "remote-url",
+    // CROSS-PROVIDER upload: OpenRouter documents no upload endpoint of its
+    // own, so a LOCAL frame is staged through the Pollinations media store —
+    // authenticated with the POLLINATIONS key (`keyProviderId`), not with the
+    // OpenRouter one (the two backends never share a key).
+    mediaUpload: {
+      url: POLLINATIONS_MEDIA_UPLOAD_URL,
+      field: "file",
+      encoding: "multipart",
+      keyProviderId: "pollinations",
+    },
     paramMap: {
       fields: {
         prompt: OR_VIDEO_FIELDS.prompt,
@@ -928,6 +988,16 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
     pathOverride: OPENROUTER_VIDEO_PATH,
     keyEnv: OPENROUTER_KEY_ENV,
     mediaStaging: "remote-url",
+    // CROSS-PROVIDER upload: OpenRouter documents no upload endpoint of its
+    // own, so a LOCAL frame is staged through the Pollinations media store —
+    // authenticated with the POLLINATIONS key (`keyProviderId`), not with the
+    // OpenRouter one (the two backends never share a key).
+    mediaUpload: {
+      url: POLLINATIONS_MEDIA_UPLOAD_URL,
+      field: "file",
+      encoding: "multipart",
+      keyProviderId: "pollinations",
+    },
     paramMap: {
       fields: {
         prompt: OR_VIDEO_FIELDS.prompt,
@@ -960,6 +1030,16 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
     pathOverride: OPENROUTER_VIDEO_PATH,
     keyEnv: OPENROUTER_KEY_ENV,
     mediaStaging: "remote-url",
+    // CROSS-PROVIDER upload: OpenRouter documents no upload endpoint of its
+    // own, so a LOCAL frame is staged through the Pollinations media store —
+    // authenticated with the POLLINATIONS key (`keyProviderId`), not with the
+    // OpenRouter one (the two backends never share a key).
+    mediaUpload: {
+      url: POLLINATIONS_MEDIA_UPLOAD_URL,
+      field: "file",
+      encoding: "multipart",
+      keyProviderId: "pollinations",
+    },
     paramMap: {
       fields: {
         prompt: OR_VIDEO_FIELDS.prompt,
@@ -986,6 +1066,16 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
     pathOverride: OPENROUTER_VIDEO_PATH,
     keyEnv: OPENROUTER_KEY_ENV,
     mediaStaging: "remote-url",
+    // CROSS-PROVIDER upload: OpenRouter documents no upload endpoint of its
+    // own, so a LOCAL frame is staged through the Pollinations media store —
+    // authenticated with the POLLINATIONS key (`keyProviderId`), not with the
+    // OpenRouter one (the two backends never share a key).
+    mediaUpload: {
+      url: POLLINATIONS_MEDIA_UPLOAD_URL,
+      field: "file",
+      encoding: "multipart",
+      keyProviderId: "pollinations",
+    },
     paramMap: {
       fields: {
         prompt: OR_VIDEO_FIELDS.prompt,
@@ -1014,6 +1104,16 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
     pathOverride: OPENROUTER_VIDEO_PATH,
     keyEnv: OPENROUTER_KEY_ENV,
     mediaStaging: "remote-url",
+    // CROSS-PROVIDER upload: OpenRouter documents no upload endpoint of its
+    // own, so a LOCAL frame is staged through the Pollinations media store —
+    // authenticated with the POLLINATIONS key (`keyProviderId`), not with the
+    // OpenRouter one (the two backends never share a key).
+    mediaUpload: {
+      url: POLLINATIONS_MEDIA_UPLOAD_URL,
+      field: "file",
+      encoding: "multipart",
+      keyProviderId: "pollinations",
+    },
     paramMap: {
       fields: {
         prompt: OR_VIDEO_FIELDS.prompt,
@@ -1052,6 +1152,16 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
     pathOverride: OPENROUTER_VIDEO_PATH,
     keyEnv: OPENROUTER_KEY_ENV,
     mediaStaging: "remote-url",
+    // CROSS-PROVIDER upload: OpenRouter documents no upload endpoint of its
+    // own, so a LOCAL frame is staged through the Pollinations media store —
+    // authenticated with the POLLINATIONS key (`keyProviderId`), not with the
+    // OpenRouter one (the two backends never share a key).
+    mediaUpload: {
+      url: POLLINATIONS_MEDIA_UPLOAD_URL,
+      field: "file",
+      encoding: "multipart",
+      keyProviderId: "pollinations",
+    },
     paramMap: {
       fields: {
         prompt: OR_VIDEO_FIELDS.prompt,
@@ -1087,6 +1197,16 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
     pathOverride: OPENROUTER_VIDEO_PATH,
     keyEnv: OPENROUTER_KEY_ENV,
     mediaStaging: "remote-url",
+    // CROSS-PROVIDER upload: OpenRouter documents no upload endpoint of its
+    // own, so a LOCAL frame is staged through the Pollinations media store —
+    // authenticated with the POLLINATIONS key (`keyProviderId`), not with the
+    // OpenRouter one (the two backends never share a key).
+    mediaUpload: {
+      url: POLLINATIONS_MEDIA_UPLOAD_URL,
+      field: "file",
+      encoding: "multipart",
+      keyProviderId: "pollinations",
+    },
     paramMap: {
       fields: {
         prompt: OR_VIDEO_FIELDS.prompt,
@@ -1118,6 +1238,16 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
     pathOverride: OPENROUTER_VIDEO_PATH,
     keyEnv: OPENROUTER_KEY_ENV,
     mediaStaging: "remote-url",
+    // CROSS-PROVIDER upload: OpenRouter documents no upload endpoint of its
+    // own, so a LOCAL frame is staged through the Pollinations media store —
+    // authenticated with the POLLINATIONS key (`keyProviderId`), not with the
+    // OpenRouter one (the two backends never share a key).
+    mediaUpload: {
+      url: POLLINATIONS_MEDIA_UPLOAD_URL,
+      field: "file",
+      encoding: "multipart",
+      keyProviderId: "pollinations",
+    },
     paramMap: {
       fields: {
         prompt: OR_VIDEO_FIELDS.prompt,
@@ -1148,6 +1278,16 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
     pathOverride: OPENROUTER_VIDEO_PATH,
     keyEnv: OPENROUTER_KEY_ENV,
     mediaStaging: "remote-url",
+    // CROSS-PROVIDER upload: OpenRouter documents no upload endpoint of its
+    // own, so a LOCAL frame is staged through the Pollinations media store —
+    // authenticated with the POLLINATIONS key (`keyProviderId`), not with the
+    // OpenRouter one (the two backends never share a key).
+    mediaUpload: {
+      url: POLLINATIONS_MEDIA_UPLOAD_URL,
+      field: "file",
+      encoding: "multipart",
+      keyProviderId: "pollinations",
+    },
     paramMap: {
       fields: {
         prompt: OR_VIDEO_FIELDS.prompt,
@@ -1176,6 +1316,16 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
     pathOverride: OPENROUTER_VIDEO_PATH,
     keyEnv: OPENROUTER_KEY_ENV,
     mediaStaging: "remote-url",
+    // CROSS-PROVIDER upload: OpenRouter documents no upload endpoint of its
+    // own, so a LOCAL frame is staged through the Pollinations media store —
+    // authenticated with the POLLINATIONS key (`keyProviderId`), not with the
+    // OpenRouter one (the two backends never share a key).
+    mediaUpload: {
+      url: POLLINATIONS_MEDIA_UPLOAD_URL,
+      field: "file",
+      encoding: "multipart",
+      keyProviderId: "pollinations",
+    },
     paramMap: {
       fields: {
         prompt: OR_VIDEO_FIELDS.prompt,
@@ -1197,6 +1347,16 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
     pathOverride: OPENROUTER_VIDEO_PATH,
     keyEnv: OPENROUTER_KEY_ENV,
     mediaStaging: "remote-url",
+    // CROSS-PROVIDER upload: OpenRouter documents no upload endpoint of its
+    // own, so a LOCAL frame is staged through the Pollinations media store —
+    // authenticated with the POLLINATIONS key (`keyProviderId`), not with the
+    // OpenRouter one (the two backends never share a key).
+    mediaUpload: {
+      url: POLLINATIONS_MEDIA_UPLOAD_URL,
+      field: "file",
+      encoding: "multipart",
+      keyProviderId: "pollinations",
+    },
     paramMap: {
       fields: {
         prompt: OR_VIDEO_FIELDS.prompt,
@@ -1217,17 +1377,6 @@ export const POLLINATIONS_IMAGE_PATH = "/v1/images/generations";
 
 /** Pollinations' key env var — the compat family does NOT share one key. */
 export const POLLINATIONS_KEY_ENV = "POLLINATIONS_API_KEY";
-
-/**
- * Pollinations' MEDIA STORE upload endpoint — a SIBLING host of the generation
- * base URL (findings §3: `POST https://media.pollinations.ai/upload`;
- * multipart / raw / base64, ≤400 MiB, 30-day lifecycle).
- *
- * This is why the Pollinations bindings stage references as "remote-url": the
- * backend takes reference images as URLs, and a local file has to be uploaded
- * to the media store first (a data-url in the request body is impractical).
- */
-export const POLLINATIONS_MEDIA_UPLOAD_URL = "https://media.pollinations.ai/upload";
 
 /**
  * The dialect fields every Pollinations image model shares.

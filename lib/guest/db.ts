@@ -291,29 +291,44 @@ const PLACEHOLDER_API_KEY = "your_kie_api_key_here";
 const realKey = (v: string | null | undefined): string | null =>
   v && v !== PLACEHOLDER_API_KEY ? v : null;
 
+/**
+ * Env fallback var NAMES per provider — `kie` unifies KIE_API_KEY ?? KIE_API_TOKEN
+ * (§3.2). The names are the single source of truth for both the key lookup
+ * below and the "add it in Settings (or set X)" error messages.
+ */
+const ENV_FALLBACK_KEY_NAMES: Record<string, readonly string[]> = {
+  kie: ["KIE_API_KEY", "KIE_API_TOKEN"],
+  azure: ["AZURE_API_KEY"],
+  replicate: ["REPLICATE_API_TOKEN"],
+  fal: ["FAL_KEY"],
+  "openai-compat": ["OPENAI_API_KEY"],
+  // The chat BYOK credential (Assistant settings) — an OpenAI-compatible
+  // key the user brought for the assistant. It is stored in
+  // `provider_configs` like every other credential; the env var is only
+  // the fallback when nothing was saved in Settings.
+  chat: ["CHAT_API_KEY"],
+  // OpenRouter rides the openai-compat family but keeps its OWN key — the
+  // family never shares one key across backends (its binding's `keyEnv`).
+  // Listed here so the readiness report and the adapter agree on the key.
+  openrouter: ["OPENROUTER_API_KEY"],
+  // Pollinations rides the openai-compat family with its OWN key (its
+  // binding's `keyEnv`). Listed here so the readiness report and the
+  // adapter agree on the key.
+  pollinations: ["POLLINATIONS_API_KEY"],
+};
+
+/** The env var a provider's key falls back to (the FIRST candidate) — for error messages. */
+export function envFallbackKeyName(providerId: string): string | null {
+  return ENV_FALLBACK_KEY_NAMES[providerId]?.[0] ?? null;
+}
+
 /** Env fallbacks per provider — `kie` unifies KIE_API_KEY ?? KIE_API_TOKEN (§3.2). */
 function envFallbackKey(providerId: string): string | null {
-  switch (providerId) {
-    case "kie":          return realKey(process.env.KIE_API_KEY) ?? realKey(process.env.KIE_API_TOKEN);
-    case "azure":        return realKey(process.env.AZURE_API_KEY);
-    case "replicate":    return realKey(process.env.REPLICATE_API_TOKEN);
-    case "fal":          return realKey(process.env.FAL_KEY);
-    case "openai-compat":return realKey(process.env.OPENAI_API_KEY);
-    // The chat BYOK credential (Assistant settings) — an OpenAI-compatible
-    // key the user brought for the assistant. It is stored in
-    // `provider_configs` like every other credential; the env var is only
-    // the fallback when nothing was saved in Settings.
-    case "chat":         return realKey(process.env.CHAT_API_KEY);
-    // OpenRouter rides the openai-compat family but keeps its OWN key — the
-    // family never shares one key across backends (its binding's `keyEnv`).
-    // Listed here so the readiness report and the adapter agree on the key.
-    case "openrouter":   return realKey(process.env.OPENROUTER_API_KEY);
-    // Pollinations rides the openai-compat family with its OWN key (its
-    // binding's `keyEnv`). Listed here so the readiness report and the
-    // adapter agree on the key.
-    case "pollinations": return realKey(process.env.POLLINATIONS_API_KEY);
-    default:             return null;
+  for (const name of ENV_FALLBACK_KEY_NAMES[providerId] ?? []) {
+    const value = realKey(process.env[name]);
+    if (value) return value;
   }
+  return null;
 }
 
 function codexAuthPath(): string {

@@ -35,6 +35,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { envFallbackKeyName, getProviderRuntimeConfig } from "../../guest/db";
 import { MEDIA_DIR } from "../../guest/paths";
 import { appendJobLog, describeError, urlHost } from "../../jobLog";
 import type { ProviderMeta } from "../../jobStore";
@@ -163,6 +164,42 @@ function resolveApiKey(
     if (fromEnv && fromEnv.trim()) return fromEnv.trim();
   }
   return null;
+}
+
+/**
+ * The key that authenticates a MEDIA UPLOAD.
+ *
+ * Two cases:
+ *  - The binding's `mediaUpload.keyProviderId` is set ⇒ the upload is a
+ *    CROSS-PROVIDER one: the endpoint belongs to ANOTHER provider than the
+ *    generation target (e.g. the OpenRouter video lane stages local frames
+ *    through the Pollinations media store), so the key of THAT provider
+ *    authenticates the upload — the generation backend's key would be
+ *    rejected by the upload host. Resolved through
+ *    `getProviderRuntimeConfig` (the stored DB key first, then that
+ *    provider's env fallback).
+ *  - Otherwise ⇒ the generation backend's own key (unchanged behavior).
+ *
+ * A cross-provider upload WITHOUT its key fails LOUDLY: an unauthenticated
+ * upload is a silent no-op at worst and a confusing 401 at best.
+ */
+function resolveUploadKey(
+  cfg: ProviderRuntimeConfig,
+  binding: ModelProviderBinding | undefined,
+  spec: NonNullable<ModelProviderBinding["mediaUpload"]>,
+): string | null {
+  const providerId = spec.keyProviderId;
+  if (!providerId) return resolveApiKey(cfg, binding);
+
+  const key = getProviderRuntimeConfig(providerId).apiKey;
+  if (key && key.trim()) return key.trim();
+
+  const envName = envFallbackKeyName(providerId);
+  throw new Error(
+    `openai-compat upload needs a "${providerId}" key (Settings, or ${envName ?? "its env var"}) — ` +
+      `the media-upload endpoint ${spec.url} is authenticated with the "${providerId}" key, ` +
+      `not with the generation backend's.`,
+  );
 }
 
 /** Endpoint path: the binding's override, else the OpenAI default. */
@@ -1075,8 +1112,8 @@ export const openaiCompatProvider: GenerationProvider = {
     polling: true,
     // The upload hook IS implemented (see `uploadMedia` below) — it is only
     // REACHED by a binding that stages media as "remote-url" (Pollinations;
-    // OpenRouter's video lane — which documents NO upload endpoint, so a
-    // local file fails loudly there instead of being sent as a `data:` URI).
+    // OpenRouter's video lane, whose local frames are staged through the
+    // Pollinations media store as a cross-provider upload).
     mediaUpload: true,
     mediaStaging: "data-url",
     // The family serves video too (the async `/videos` leg).
@@ -1094,6 +1131,11 @@ export const openaiCompatProvider: GenerationProvider = {
    * never from a vendor branch in code (compat-plan §a): Pollinations'
    * binding points at its media store (`media.pollinations.ai/upload`), any
    * other backend points at its own.
+   *
+   * The AUTHENTICATING KEY follows the binding too: a `mediaUpload` that
+   * names a `keyProviderId` is a cross-provider upload (e.g. the OpenRouter
+   * video lane stages local frames through the Pollinations media store) and
+   * is authenticated with THAT provider's key — see `resolveUploadKey`.
    */
   async uploadMedia(
     localPathOrDataUrl: string,
@@ -1108,7 +1150,7 @@ export const openaiCompatProvider: GenerationProvider = {
           `"remote-url" but its binding declares no media-upload endpoint (mediaUpload.url).`,
       );
     }
-    const apiKey = resolveApiKey(cfg, binding);
+    const apiKey = resolveUploadKey(cfg, binding, spec);
     const bytes = await readLocalBytes(localPathOrDataUrl, mimeType);
     return uploadToMediaStore(spec, bytes, apiKey);
   },

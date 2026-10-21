@@ -4,9 +4,10 @@ import { createPortal } from "react-dom";
 import NextImage from "next/image";
 import { useRouter } from "next/navigation";
 import { useWorkflowStore, Space } from "@/lib/store";
-import { makeUGCTemplate } from "@/lib/templates";
+import { type WorkflowTemplate } from "@/lib/workflowTemplates";
 import { timeAgo } from "@/lib/useSpaceSync";
 import { WorkflowHero } from "@/components/WorkflowHero";
+import { TemplateGallery } from "@/components/TemplateGallery";
 import DotCanvasBackground from "@/components/ui/DotCanvasBackground";
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
@@ -169,111 +170,92 @@ const CSS = `
 
   @keyframes wsd-spin { to { transform: rotate(360deg); } }
 
-  .wsd-tmpl {
-    position: relative;
-    background: #0C0F16;
-    border: 1px dashed rgba(99,102,241,0.3);
-    border-radius: 18px;
-    overflow: hidden;
-    cursor: pointer;
-    display: flex; flex-direction: column;
-    transition: transform 240ms cubic-bezier(.22,1,.36,1),
-                box-shadow  240ms cubic-bezier(.22,1,.36,1),
-                border-color 240ms ease,
-                background 240ms ease;
+  .wsd-spaces-header {
+    padding: 36px 32px 20px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+    row-gap: 16px;
   }
-  .wsd-tmpl:hover {
-    border-color: rgba(99,102,241,0.55);
-    background: #0e1019;
-    box-shadow:
-      0 0 0 1px rgba(99,102,241,0.15),
-      0 16px 48px rgba(0,0,0,0.6);
-    transform: translateY(-4px);
+
+  .wsd-spaces-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 18px;
+    padding: 0 32px;
   }
-  .wsd-tmpl:hover .wsd-tmpl-orb {
-    box-shadow: 0 0 32px rgba(99,102,241,0.45), 0 0 0 1px rgba(255,255,255,0.15) inset;
+
+  @media (max-width: 1200px) {
+    .wsd-spaces-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 900px) {
+    .wsd-spaces-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .wsd-spaces-header {
+      padding: 28px 20px 16px;
+    }
+    .wsd-spaces-grid {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 14px;
+      padding: 0 20px;
+    }
   }
 `;
-
-// ── Template card ─────────────────────────────────────────────────────────────
-
-// TEMPORARY: local stand-ins for the bundled sample media (see lib/templates.ts).
-const TEMPLATE_PREVIEWS = [
-  "/placeholders/thumb-1.svg",
-  "/placeholders/thumb-2.svg",
-  "/placeholders/thumb-3.svg",
-  "/placeholders/thumb-4.svg",
-];
-
-function TemplateCard({ onLoad, onReset }: { onLoad: () => void; onReset: (e: React.MouseEvent) => void }) {
-  return (
-    <div
-      className="wsd-tmpl"
-      role="button"
-      tabIndex={0}
-      onClick={onLoad}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onLoad(); }}
-    >
-      <div className="wsd-thumbs">
-        {TEMPLATE_PREVIEWS.map((url, i) => (
-          <div key={i} className="wsd-thumb-cell">
-            <NextImage src={url} alt="" fill sizes="160px" style={{ objectFit: "cover" }} />
-          </div>
-        ))}
-        <div className="wsd-thumb-overlay" />
-      </div>
-      <div style={{
-        padding: "14px 16px 16px",
-        borderTop: "1px solid rgba(99,102,241,0.1)",
-        display: "flex", flexDirection: "column", gap: "10px",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontSize: "15px", fontWeight: 600, color: "#fff", letterSpacing: "-0.015em" }}>
-            UGC Template
-          </div>
-          <button
-            onClick={onReset}
-            title="Reset template"
-            style={{
-              appearance: "none", border: "1px solid rgba(99,102,241,0.25)", background: "rgba(99,102,241,0.08)",
-              borderRadius: "7px", width: "28px", height: "28px", display: "grid", placeItems: "center",
-              cursor: "pointer", color: "rgba(99,102,241,0.7)", transition: "all 140ms ease", flexShrink: 0,
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(99,102,241,0.2)"; e.currentTarget.style.color = "#818cf8"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(99,102,241,0.08)"; e.currentTarget.style.color = "rgba(99,102,241,0.7)"; }}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}>
-              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-              <path d="M3 3v5h5" />
-            </svg>
-          </button>
-        </div>
-        <div style={{
-          display: "flex", alignItems: "center", gap: "6px",
-          fontSize: "10px", fontWeight: 500, letterSpacing: "0.04em",
-          color: "rgba(99,102,241,0.6)", textTransform: "uppercase",
-        }}>
-          <span>4× Image → 4× Video</span>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Media collection ──────────────────────────────────────────────────────────
 
 type MediaItem = { type: "image"; url: string } | { type: "video"; url: string };
+
+/**
+ * URLs the app knows are gone. Old spaces still carry them in `r2Url`, and the
+ * bucket answers 404/401 — rendering them only produces broken tiles (and, for
+ * the Next image optimizer, a hard runtime error). Filter them at collection.
+ */
+function isDeadMediaHost(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host.endsWith(".r2.dev");
+  } catch {
+    return false;
+  }
+}
+
+/** Hosts that `next/image` is allowed to optimize (mirrors next.config images). */
+function canOptimizeImage(url: string): boolean {
+  if (url.startsWith("/")) return true;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "https:") return false;
+    return (
+      u.hostname.endsWith(".replicate.delivery") ||
+      u.hostname === "pbxt.replicate.delivery" ||
+      u.hostname.endsWith(".replicate.com") ||
+      u.hostname.endsWith(".aiquickdraw.com")
+    );
+  } catch {
+    return false;
+  }
+}
 
 function collectMedia(space: Space): MediaItem[] {
   const items: MediaItem[] = [];
   for (const node of space.nodes) {
     const { r2Url, imageUrl, videoUrl } = node.data;
     if (typeof videoUrl === "string" && videoUrl) {
-      items.push({ type: "video", url: videoUrl });
+      if (!isDeadMediaHost(videoUrl)) items.push({ type: "video", url: videoUrl });
     } else if (typeof r2Url === "string" && r2Url) {
-      items.push({ type: "image", url: r2Url });
+      if (!isDeadMediaHost(r2Url)) items.push({ type: "image", url: r2Url });
     } else if (typeof imageUrl === "string" && imageUrl) {
-      items.push({ type: "image", url: imageUrl });
+      if (!isDeadMediaHost(imageUrl)) items.push({ type: "image", url: imageUrl });
     }
   }
   return items;
@@ -296,8 +278,17 @@ function ThumbnailMosaic({ space }: { space: Space }) {
                   muted loop playsInline autoPlay preload="metadata"
                   style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                 />
-              ) : (
+              ) : canOptimizeImage(item.url) ? (
                 <NextImage src={item.url} alt="" fill sizes="160px" style={{ objectFit: "cover" }} />
+              ) : (
+                // Unknown external host (or data URL) — render directly so an
+                // unconfigured `next/image` host can never crash the dashboard.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={item.url}
+                  alt=""
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                />
               )
             ) : (
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -630,7 +621,6 @@ export default function WorkflowDashboard() {
   const spaces = useWorkflowStore((s) => s.spaces);
   const createSpace = useWorkflowStore((s) => s.createSpace);
   const switchSpace = useWorkflowStore((s) => s.switchSpace);
-  const deleteSpace = useWorkflowStore((s) => s.deleteSpace);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -679,29 +669,25 @@ export default function WorkflowDashboard() {
     router.push(`/workflow/${newId}`);
   };
 
-  const TEMPLATE_NAME = "UGC Template";
-
-  const spawnFreshTemplate = () => {
-    const store = useWorkflowStore.getState();
-    const existing = store.spaces.find((sp) => sp.name === TEMPLATE_NAME);
-    if (existing) {
-      if (store.spaces.length === 1) store.createSpace("Space 1");
-      deleteSpace(existing.id);
+  const handleUseTemplate = (template: WorkflowTemplate) => {
+    const existingNames = new Set(
+      useWorkflowStore.getState().spaces.map((sp) => sp.name),
+    );
+    let name = template.name;
+    if (existingNames.has(name)) {
+      let n = 2;
+      while (existingNames.has(`${template.name} (${n})`)) {
+        n += 1;
+      }
+      name = `${template.name} (${n})`;
     }
-    createSpace(TEMPLATE_NAME, makeUGCTemplate());
+    createSpace(name, template.make());
     const newId = useWorkflowStore.getState().activeSpaceId;
     router.push(`/workflow/${newId}`);
   };
 
-  const handleLoadTemplate = () => spawnFreshTemplate();
-
-  const handleResetTemplate = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    spawnFreshTemplate();
-  };
-
   const sorted = [...spaces]
-    .filter((sp) => sp.nodes.length > 0 && sp.name !== TEMPLATE_NAME)
+    .filter((sp) => sp.nodes.length > 0)
     .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
 
   return (
@@ -721,12 +707,11 @@ export default function WorkflowDashboard() {
 
         <WorkflowHero />
 
+        {/* ── Template gallery (primary entry point) ── */}
+        <TemplateGallery onSelectTemplate={handleUseTemplate} />
+
         {/* ── Page header ── */}
-        <section style={{
-          padding: "28px 32px 20px",
-          display: "flex", alignItems: "center", gap: "24px",
-          flexWrap: "wrap", rowGap: "16px",
-        }}>
+        <section className="wsd-spaces-header">
           <div>
             <h1 style={{
               margin: 0,
@@ -770,15 +755,9 @@ export default function WorkflowDashboard() {
           </div>
         </section>
 
-        {/* ── Grid ── */}
-        <section style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
-          gap: "18px",
-          padding: "0 32px",
-        }}>
+        {/* ── Saved spaces grid ── */}
+        <section className="wsd-spaces-grid">
           <CreateCard onCreate={handleCreate} />
-          <TemplateCard onLoad={handleLoadTemplate} onReset={handleResetTemplate} />
           {sorted.map((sp) => (
             <SpaceCard key={sp.id} space={sp} onOpen={() => openSpace(sp.id)} />
           ))}

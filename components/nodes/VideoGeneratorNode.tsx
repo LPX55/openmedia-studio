@@ -12,7 +12,7 @@ import { PROVIDERS, getModelProvider, setModelProvider, modelHasProviderChoice, 
 import { ProviderBrandIcon, NodeProviderIcon } from "@/components/ui/ProviderIcon";
 import { resolveInputs } from "@/lib/executor";
 import { useReadOnly } from "@/lib/readOnlyContext";
-import { ShieldBan } from "lucide-react";
+import { ShieldBan, Clapperboard } from "lucide-react";
 import { VIDEO_MODELS as VIDEO_MODEL_CFG } from "@/lib/modelConfig";
 import { useGeneratingBorderAnimation } from "@/lib/useGeneratingBorderAnimation";
 import MissingInputWarning from "./MissingInputWarning";
@@ -632,6 +632,18 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
   });
   const ratios = cfg.ratios;
   const durations = cfg.durations;
+  const idleCaption = (() => {
+    const parts: string[] = [];
+    if (ratios.length > 0 && aspectRatio) {
+      parts.push(aspectRatio.toUpperCase());
+    }
+    if (durations.length > 0 && duration > 0) {
+      parts.push(`${duration}s`);
+    } else if (ratios.length === 0 && cfg.resolutions && resolution) {
+      parts.push(resolution.toUpperCase());
+    }
+    return parts.join(" · ") || "VIDEO";
+  })();
 
   const closeAll = () => {
     setModelOpen(false); setRatioOpen(false); setDurOpen(false);
@@ -1439,6 +1451,9 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
             </div>
           ) : (
             <div className="w-full h-full">
+              {!busy && !isQueued && !data.locked && !videoUrl && !(viewMode === "frame" && displayFrameUrl) && (
+                <IdleVideoFrame caption={idleCaption} />
+              )}
               {textNode && (
                 <div className="absolute bottom-12 left-4 flex items-center gap-1.5 z-10">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#2DD4BF] shrink-0" />
@@ -2222,6 +2237,27 @@ function ToggleSwitch({ on, activeColor = "#4ade80" }: { on: boolean; activeColo
   );
 }
 
+
+function IdleVideoFrame({ caption }: { caption: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      className="w-full h-full flex flex-col items-center justify-center gap-2 px-3 pointer-events-none select-none"
+    >
+      <Clapperboard
+        size={18}
+        strokeWidth={1.5}
+        style={{ color: "#5EEAD4", opacity: 0.28, flexShrink: 0 }}
+      />
+      <span
+        className="font-mono text-[11px] font-medium tracking-[0.08em] tabular-nums leading-none whitespace-nowrap"
+        style={{ color: "#6A7080" }}
+      >
+        {caption}
+      </span>
+    </div>
+  );
+}
 
 function VideoNodeIcon() {
   return (

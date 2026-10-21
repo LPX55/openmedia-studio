@@ -15,7 +15,7 @@ import { browserNotify, requestNotificationPermission } from "@/lib/browserNotif
 
 type GenerateNodeType = Node<NodeData, "generateNode">;
 
-import { ShieldBan } from "lucide-react";
+import { ShieldBan, Sparkles } from "lucide-react";
 import { IMAGE_MODELS, AZURE_POPULAR_SIZES, validateAzureCustomSize } from "@/lib/modelConfig";
 import { PROVIDERS, getModelProvider, setModelProvider, modelHasProviderChoice, enabledProvidersForModel, isModelReady, isModelEnabled, defaultModelId } from "@/lib/providers";
 import { ProviderBrandIcon, NodeProviderIcon } from "@/components/ui/ProviderIcon";
@@ -445,6 +445,22 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
   const animBusy = loading || status === "running";
   const busy = animBusy || isPending;
   const isQueued = !busy && !!data.pipelineQueued;
+  const idleCaption = (() => {
+    const parts: string[] = [];
+    if (caps.ratios.length > 0 || aspectRatio === "custom") {
+      parts.push(
+        aspectRatio === "custom"
+          ? `${(data.azureCustomWidth as number | undefined) ?? 1024}×${(data.azureCustomHeight as number | undefined) ?? 1024}`
+          : aspectRatio.toUpperCase(),
+      );
+    }
+    if (caps.azureQualityOptions && isAzureProvider) {
+      parts.push(((data.azureQuality as string | undefined) ?? "auto").toUpperCase());
+    } else if (caps.supportsQuality && quality) {
+      parts.push(quality.toUpperCase());
+    }
+    return parts.join(" · ") || "IMAGE";
+  })();
   // The job the run log shows: the live task while it runs, the last one
   // after it settled (`lastTaskId` outlives `taskId`, which is cleared on
   // settle). Read-only — it never touches the node's status machine.
@@ -1060,6 +1076,8 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
                 );
               })()}
             </div>
+          ) : !busy && !isQueued && !data.locked && !data.imageUrl ? (
+            <IdleImageFrame caption={idleCaption} />
           ) : (
             <div className="w-full h-full" />
           )}
@@ -1568,6 +1586,27 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
 }
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
+
+function IdleImageFrame({ caption }: { caption: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      className="w-full h-full flex flex-col items-center justify-center gap-2 px-3 pointer-events-none select-none"
+    >
+      <Sparkles
+        size={18}
+        strokeWidth={1.5}
+        style={{ color: "#2DD4BF", opacity: 0.28, flexShrink: 0 }}
+      />
+      <span
+        className="font-mono text-[11px] font-medium tracking-[0.08em] tabular-nums leading-none whitespace-nowrap"
+        style={{ color: "#6A7080" }}
+      >
+        {caption}
+      </span>
+    </div>
+  );
+}
 
 function PromptIcon() {
   return (

@@ -1,11 +1,30 @@
 # STATE
 status: done        # active | paused | blocked | done
-focus: P6 video lane (OpenRouter video through the openai-compat family) landed in the WORKING TREE on feat/pluggable-providers — submit/poll/route wired, offline smoke green; NOT live-tested
-next: user call — approve the live video test (spend) or continue with the next scope (automations / merge)
+focus: provider migration journey documented (docs/provider-migration-journey.md); P1→P6 all committed on feat/pluggable-providers at 7208ce4, nothing pushed
+next: build the workflow automations pack (realistic image + video workflows across input types and endpoints); live video test still awaits a spend decision; merge awaits push approval
 blockers: none
 updated: 2026-10-21
 
 ## Notes
+
+- 2026-10-21 — JOURNEY DOC: `docs/provider-migration-journey.md` records the
+  whole provider migration as narrative — starting state (client-driven routing,
+  9-way video switch, two-key credentials, no endpoint concept), the constraints
+  that decided the architecture (no vendor locks, one compat contract, presets
+  for robustness, cost as a ranking factor, server authority), the paths killed
+  (fal, aggregators, HF, Segmind, SpicyAPI-as-compat, dedicated adapters, custom
+  endpoint UI, harness day), the architecture (catalog vs bindings, dialect as
+  binding data, one settle funnel, preset resolution), a phase chronicle
+  P1→P6-video with what each lane proved, the 11 live findings that changed code
+  (auto-ratio 400, refs as objects, numeric seed, bearer content endpoint, no
+  video upload endpoint, `/images` vs `/v1/images/generations`, per-model
+  endpoints 404…), the pricing doctrine + captured numbers, the process rules
+  (spike-before-bind, promotion gate, 432-assertion offline fixture, eslint
+  zero-new-vs-HEAD), an honest failure list (mapping ≠ capability on video, disk
+  100% full, P3 gate failure, unverified kie apiIds, flagged UI gaps), and the
+  open-items table. Numbers verified against the tree: 40 catalog models
+  (20/20), 84 built-in bindings, 5 registered adapters, 4 presets, 432 smoke
+  assertions.
 
 - 2026-10-21 — P6 VIDEO lane (provider-refactor-impl) landed in the WORKING TREE
   (uncommitted, no commits per the task) on `feat/pluggable-providers`: the

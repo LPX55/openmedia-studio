@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Character silhouette performing transferred motion">
+  <rect width="160" height="160" fill="#0C0F16"/>
+  <!-- 9:16 Output performance frame -->
+  <rect x="44" y="30" width="72" height="100" rx="6" fill="#141820" stroke="#f472b6" stroke-width="1.5"/>
+  <!-- Ghosted start silhouette -->
+  <circle cx="70" cy="52" r="7" fill="#1B212C" stroke="#2A3140" stroke-width="1.2"/>
+  <path d="M60 64 L78 64 L76 112 L62 112 Z" fill="#1B212C" stroke="#2A3140" stroke-width="1.2"/>
+  <!-- Dotted motion arc from ghost to active silhouette -->
+  <path d="M64 70 Q84 52 102 58" fill="none" stroke="#f472b6" stroke-width="1.8" stroke-dasharray="3 3" stroke-linecap="round"/>
+  <!-- Active character silhouette in transferred stride pose -->
+  <circle cx="84" cy="49" r="7.5" fill="#f472b6"/>
+  <path d="M66 72 L81 60 L101 53 L104 59 L88 67 L86 84 L99 111 L92 114 L81 91 L71 114 L64 111 L76 83 L77 68 L63 77 Z" fill="#f472b6" fill-opacity="0.86"/>
+</svg>

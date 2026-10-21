@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Product orbital camera motion 16:9">
+  <rect width="160" height="160" fill="#0C0F16"/>
+  <!-- 16:9 widescreen motion frame -->
+  <rect x="20" y="36" width="120" height="88" rx="6" fill="#141820" stroke="#2A3140" stroke-width="1.4"/>
+  <!-- Plinth -->
+  <polygon points="46,102 114,102 122,110 38,110" fill="#1B212C" stroke="#3A4356" stroke-width="1.1"/>
+  <!-- Product silhouette -->
+  <rect x="67" y="56" width="26" height="46" rx="4" fill="#1B212C" stroke="#3A4356" stroke-width="1.4"/>
+  <rect x="73" y="46" width="14" height="10" rx="2" fill="#1B212C" stroke="#3A4356" stroke-width="1.2"/>
+  <rect x="71" y="68" width="18" height="14" rx="1.5" fill="#2DD4BF" fill-opacity="0.35"/>
+  <!-- Back orbital path -->
+  <path d="M36 84 A46 14 0 0 1 124 84" fill="none" stroke="#3A4356" stroke-width="1.2" stroke-dasharray="3 3"/>
+  <!-- Front orbital push arc (accent) -->
+  <path d="M36 84 A46 16 0 0 0 120 87" fill="none" stroke="#2DD4BF" stroke-width="2" stroke-linecap="round"/>
+  <polygon points="124,84 115,83 118,91" fill="#2DD4BF"/>
+</svg>

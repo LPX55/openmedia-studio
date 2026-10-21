@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Scene A blue hour harbour landscape frame">
+  <rect width="160" height="160" fill="#0C0F16"/>
+  <!-- 16:9 Landscape frame (Scene A) -->
+  <rect x="20" y="38" width="120" height="84" rx="5" fill="#141820" stroke="#3A4356" stroke-width="1.5"/>
+  <!-- Blue-hour sky band -->
+  <rect x="21" y="39" width="118" height="46" rx="4" fill="#1B212C"/>
+  <rect x="21" y="39" width="118" height="46" rx="4" fill="#22d3ee" fill-opacity="0.08"/>
+  <!-- Quay & horizon line -->
+  <line x1="20" y1="85" x2="140" y2="85" stroke="#3A4356" stroke-width="1.4"/>
+  <!-- Streetlamp on left third (unlit/dim) -->
+  <line x1="48" y1="54" x2="48" y2="85" stroke="#3A4356" stroke-width="1.8"/>
+  <circle cx="48" cy="53" r="3" fill="#22d3ee" fill-opacity="0.45"/>
+  <!-- Moored boat silhouette -->
+  <polygon points="72,83 114,83 108,92 78,92" fill="#2A3140" stroke="#3A4356" stroke-width="1.2"/>
+  <line x1="92" y1="64" x2="92" y2="83" stroke="#3A4356" stroke-width="1.4"/>
+</svg>

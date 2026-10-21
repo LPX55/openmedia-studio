@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Filmstrip segment changing treatment halfway from source to restyled">
+  <rect width="160" height="160" fill="#0C0F16"/>
+  <!-- Filmstrip body -->
+  <rect x="12" y="42" width="136" height="76" rx="5" fill="#141820" stroke="#3A4356" stroke-width="1.4"/>
+  <!-- Top & bottom sprocket holes -->
+  <g fill="#0C0F16" stroke="#2A3140" stroke-width="1">
+    <rect x="20" y="46" width="8" height="5" rx="1"/><rect x="36" y="46" width="8" height="5" rx="1"/>
+    <rect x="52" y="46" width="8" height="5" rx="1"/><rect x="68" y="46" width="8" height="5" rx="1"/>
+    <rect x="84" y="46" width="8" height="5" rx="1"/><rect x="100" y="46" width="8" height="5" rx="1"/>
+    <rect x="116" y="46" width="8" height="5" rx="1"/><rect x="132" y="46" width="8" height="5" rx="1"/>
+    <rect x="20" y="109" width="8" height="5" rx="1"/><rect x="36" y="109" width="8" height="5" rx="1"/>
+    <rect x="52" y="109" width="8" height="5" rx="1"/><rect x="68" y="109" width="8" height="5" rx="1"/>
+    <rect x="84" y="109" width="8" height="5" rx="1"/><rect x="100" y="109" width="8" height="5" rx="1"/>
+    <rect x="116" y="109" width="8" height="5" rx="1"/><rect x="132" y="109" width="8" height="5" rx="1"/>
+  </g>
+  <!-- Left two cells: Muted source treatment -->
+  <rect x="18" y="56" width="28" height="48" rx="2" fill="#0C0F16" stroke="#2A3140" stroke-width="1.2"/>
+  <circle cx="32" cy="73" r="6" fill="none" stroke="#3A4356" stroke-width="1.3"/>
+  <path d="M23 102 C23 91 41 91 41 102" fill="none" stroke="#3A4356" stroke-width="1.3"/>
+  <rect x="49" y="56" width="28" height="48" rx="2" fill="#0C0F16" stroke="#2A3140" stroke-width="1.2"/>
+  <circle cx="63" cy="72" r="6" fill="none" stroke="#3A4356" stroke-width="1.3"/>
+  <path d="M54 102 C54 90 72 90 72 102" fill="none" stroke="#3A4356" stroke-width="1.3"/>
+  <!-- Right two cells: Restyled cel-shaded treatment in accent -->
+  <rect x="83" y="56" width="28" height="48" rx="2" fill="#1B212C" stroke="#a78bfa" stroke-width="1.3"/>
+  <rect x="84" y="57" width="26" height="22" fill="#a78bfa" fill-opacity="0.22"/>
+  <circle cx="97" cy="72" r="6.5" fill="#a78bfa"/>
+  <path d="M88 103 C88 90 106 90 106 103 Z" fill="#a78bfa" fill-opacity="0.85"/>
+  <rect x="114" y="56" width="28" height="48" rx="2" fill="#1B212C" stroke="#a78bfa" stroke-width="1.3"/>
+  <rect x="115" y="57" width="26" height="22" fill="#a78bfa" fill-opacity="0.22"/>
+  <circle cx="128" cy="71" r="6.5" fill="#a78bfa"/>
+  <path d="M119 103 C119 90 137 90 137 103 Z" fill="#a78bfa" fill-opacity="0.85"/>
+  <!-- Halfway transformation divider line -->
+  <line x1="80" y1="34" x2="80" y2="126" stroke="#a78bfa" stroke-width="2" stroke-linecap="round"/>
+</svg>

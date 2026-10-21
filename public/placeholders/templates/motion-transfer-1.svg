@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Dotted motion path arcs transferring from stick figure frame to silhouette frame">
+  <rect width="160" height="160" fill="#0C0F16"/>
+  <!-- Left frame: Stick-figure motion source -->
+  <rect x="16" y="34" width="52" height="92" rx="5" fill="#141820" stroke="#3A4356" stroke-width="1.4"/>
+  <circle cx="42" cy="52" r="5.5" fill="none" stroke="#3A4356" stroke-width="1.6"/>
+  <path d="M42 58L40 82 M28 70L41 64L54 58 M40 82L30 110 M40 82L52 106" fill="none" stroke="#3A4356" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="54" cy="58" r="2.5" fill="#f472b6"/>
+  <circle cx="41" cy="64" r="2.2" fill="#f472b6"/>
+  <circle cx="52" cy="106" r="2.5" fill="#f472b6"/>
+  <!-- Right frame: Second character silhouette in transferred pose -->
+  <rect x="92" y="34" width="52" height="92" rx="5" fill="#141820" stroke="#f472b6" stroke-width="1.5"/>
+  <circle cx="118" cy="52" r="6.5" fill="#f472b6"/>
+  <path d="M104 71L116 62L130 56L132 61L121 69L120 84L130 107L124 110L115 90L107 111L101 108L111 83L112 69L102 76Z" fill="#f472b6" fill-opacity="0.82"/>
+  <!-- Dotted motion transfer arcs bridging stick figure to silhouette -->
+  <path d="M48 50 Q80 34 110 50" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-dasharray="3 3" stroke-linecap="round"/>
+  <path d="M56 58 Q86 48 128 57" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-dasharray="3 3" stroke-linecap="round"/>
+  <path d="M54 106 Q86 118 125 107" fill="none" stroke="#f472b6" stroke-width="1.7" stroke-dasharray="3 3" stroke-linecap="round"/>
+</svg>

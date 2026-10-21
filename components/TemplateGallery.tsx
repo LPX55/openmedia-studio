@@ -129,6 +129,14 @@ const GALLERY_CSS = `
     opacity: 1;
   }
 
+  .wsd-tmpl-card .wsd-thumbs {
+    background: #1B212C;
+  }
+
+  .wsd-tmpl-card .wsd-thumb-cell {
+    background: #0C0F16;
+  }
+
   .wsd-tmpl-card:hover .wsd-thumb-overlay,
   .wsd-tmpl-card:focus-visible .wsd-thumb-overlay {
     opacity: 1;

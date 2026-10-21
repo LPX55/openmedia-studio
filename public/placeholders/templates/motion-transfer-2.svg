@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Motion reference stick figure with dotted velocity arcs">
+  <rect width="160" height="160" fill="#0C0F16"/>
+  <!-- 9:16 Motion reference frame -->
+  <rect x="44" y="30" width="72" height="100" rx="6" fill="#141820" stroke="#3A4356" stroke-width="1.4"/>
+  <!-- Dotted motion trajectory arcs -->
+  <path d="M56 76 A26 24 0 0 1 102 54" fill="none" stroke="#f472b6" stroke-width="1.8" stroke-dasharray="3 3" stroke-linecap="round"/>
+  <path d="M62 114 A28 20 0 0 0 98 104" fill="none" stroke="#f472b6" stroke-width="1.8" stroke-dasharray="3 3" stroke-linecap="round"/>
+  <!-- Articulated stick-figure skeleton -->
+  <circle cx="80" cy="48" r="6.5" fill="#1B212C" stroke="#3A4356" stroke-width="1.8"/>
+  <path d="M80 55L78 82 M58 72L79 62L98 54 M78 82L64 114 M78 82L96 106" fill="none" stroke="#3A4356" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Active joint markers -->
+  <circle cx="80" cy="48" r="2.5" fill="#f472b6"/>
+  <circle cx="79" cy="62" r="2.8" fill="#f472b6"/>
+  <circle cx="98" cy="54" r="3" fill="#f472b6"/>
+  <circle cx="78" cy="82" r="2.8" fill="#f472b6"/>
+  <circle cx="96" cy="106" r="3" fill="#f472b6"/>
+</svg>

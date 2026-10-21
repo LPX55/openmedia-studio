@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Character still silhouette with rig anchor points">
+  <rect width="160" height="160" fill="#0C0F16"/>
+  <!-- 9:16 Character frame -->
+  <rect x="44" y="30" width="72" height="100" rx="6" fill="#141820" stroke="#3A4356" stroke-width="1.4"/>
+  <!-- Standing character silhouette -->
+  <circle cx="80" cy="50" r="8" fill="#1B212C" stroke="#3A4356" stroke-width="1.6"/>
+  <path d="M66 64 C66 60 72 58 80 58 C88 58 94 60 94 64 L96 88 L90 88 L89 70 L87 116 L81 116 L80 90 L79 116 L73 116 L71 70 L70 88 L64 88 Z" fill="#1B212C" stroke="#3A4356" stroke-width="1.4" stroke-linejoin="round"/>
+  <!-- Target rig registration points on silhouette -->
+  <circle cx="80" cy="50" r="2.6" fill="#f472b6"/>
+  <circle cx="71" cy="63" r="2.6" fill="#f472b6"/>
+  <circle cx="89" cy="63" r="2.6" fill="#f472b6"/>
+  <circle cx="80" cy="84" r="2.6" fill="#f472b6"/>
+  <circle cx="75" cy="102" r="2.6" fill="#f472b6"/>
+  <circle cx="85" cy="102" r="2.6" fill="#f472b6"/>
+</svg>

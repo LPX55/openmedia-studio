@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Campaign kit with 1:1 filled and 16:9, 9:16 outlined">
+  <rect width="160" height="160" fill="#0C0F16"/>
+  <!-- 16:9 Landscape frame (OUTLINED) -->
+  <rect x="20" y="34" width="68" height="38" rx="4" fill="#141820" stroke="#3A4356" stroke-width="1.4"/>
+  <rect x="44" y="42" width="14" height="22" rx="2" fill="#1B212C" stroke="#2A3140" stroke-width="1.2"/>
+  <!-- 1:1 Square frame (FILLED) -->
+  <rect x="20" y="80" width="46" height="46" rx="4" fill="#FBBF24" fill-opacity="0.22" stroke="#FBBF24" stroke-width="1.6"/>
+  <rect x="33" y="91" width="12" height="24" rx="2" fill="#FBBF24" fill-opacity="0.9"/>
+  <circle cx="52" cy="107" r="5" fill="#FBBF24" fill-opacity="0.6"/>
+  <!-- 9:16 Vertical story frame (OUTLINED) -->
+  <rect x="98" y="34" width="42" height="92" rx="4" fill="#141820" stroke="#3A4356" stroke-width="1.4"/>
+  <rect x="112" y="64" width="14" height="30" rx="2" fill="#1B212C" stroke="#2A3140" stroke-width="1.2"/>
+  <!-- Subtle kit connector lines -->
+  <path d="M88 53H98 M66 103H98" fill="none" stroke="#2A3140" stroke-width="1.2" stroke-dasharray="2 2"/>
+</svg>

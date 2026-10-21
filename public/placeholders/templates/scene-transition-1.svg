@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Two landscape frames with directional interpolation arc">
+  <rect width="160" height="160" fill="#0C0F16"/>
+  <!-- Landscape Frame A (top-left, startFrame) -->
+  <rect x="16" y="34" width="64" height="38" rx="4" fill="#141820" stroke="#3A4356" stroke-width="1.4"/>
+  <line x1="16" y1="58" x2="80" y2="58" stroke="#2A3140" stroke-width="1.2"/>
+  <circle cx="32" cy="46" r="3" fill="#3A4356"/>
+  <polygon points="44,58 64,58 60,63 48,63" fill="#2A3140"/>
+  <!-- Ghosted midpoint interpolation frame -->
+  <rect x="48" y="60" width="64" height="38" rx="4" fill="none" stroke="#22d3ee" stroke-opacity="0.32" stroke-width="1.2" stroke-dasharray="3 3"/>
+  <!-- Landscape Frame B (bottom-right, endFrame) -->
+  <rect x="80" y="88" width="64" height="38" rx="4" fill="#1B212C" stroke="#22d3ee" stroke-width="1.6"/>
+  <line x1="80" y1="112" x2="144" y2="112" stroke="#3A4356" stroke-width="1.2"/>
+  <circle cx="96" cy="100" r="4" fill="#22d3ee"/>
+  <polygon points="110,112 130,112 126,117 114,117" fill="#22d3ee" fill-opacity="0.75"/>
+  <!-- Directional interpolation arc -->
+  <path d="M52 34 C96 28 118 48 118 82" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"/>
+  <polygon points="118,86 113,78 123,78" fill="#22d3ee"/>
+</svg>

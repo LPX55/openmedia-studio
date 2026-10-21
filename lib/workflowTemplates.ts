@@ -331,7 +331,9 @@ const BRIEF_OUTPUT =
 function makeCampaignKit(): WorkflowGraph {
   const g = createGraph();
 
-  add(g, "assistantNode", "tpl-ck-brief", -380, -40, { w: 320, h: 300 }, {
+  // Tall enough to show the whole pre-filled brief: the node's output pane is
+  // read-only, so clipping it would hide the very text the three generators use.
+  add(g, "assistantNode", "tpl-ck-brief", -400, -140, { w: 340, h: 560 }, {
     label: BRIEF_LABEL,
     status: "done",
     model: "claude-sonnet-4-6",
@@ -463,23 +465,25 @@ const MOTION_PROMPT =
 function makeMotionTransfer(): WorkflowGraph {
   const g = createGraph();
 
-  add(g, "videoInputNode", "tpl-mt-src", -380, -60, { w: 280, h: 300 }, {
+  // The video-input node sizes itself to the clip's 9:16 frame (~500px tall at
+  // this width), so the character frame sits below it rather than alongside.
+  add(g, "videoInputNode", "tpl-mt-src", -380, -80, { w: 280, h: 300 }, {
     label: "Motion reference",
     status: "idle",
     videoUrl: "/placeholders/video-3.mp4",
     videoAspectRatio: "9 / 16",
   });
 
-  add(g, "imageInputNode", "tpl-mt-character", -380, 300, INPUT_SIZE, {
+  add(g, "imageInputNode", "tpl-mt-character", -380, 520, INPUT_SIZE, {
     label: "Character frame",
     status: "idle",
     r2Url: "/placeholders/avatar.svg",
     imageNaturalRatio: "9 / 16",
   });
 
-  prompt(g, "tpl-mt-p1", "Motion transfer — prompt", MOTION_PROMPT, 0, -400);
+  prompt(g, "tpl-mt-p1", "Motion transfer — prompt", MOTION_PROMPT, 20, -420);
 
-  videoGen(g, "tpl-mt-out", "Motion transfer", "kling-2.6-motion-control", 0, -20, {
+  videoGen(g, "tpl-mt-out", "Motion transfer", "kling-2.6-motion-control", 20, 0, {
     sound: false,
   });
 
@@ -503,7 +507,12 @@ export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
     tags: ["IMAGE → VIDEO", "PRODUCT", "I2V"],
     models: ["nano-banana-pro", "seedream-5-lite", "veo3_fast", "seedance-2-fast"],
     accent: "#2DD4BF",
-    preview: [PH(3), PH(1), PH(2), PH(4)],
+    preview: [
+      "/placeholders/templates/product-ad-1.svg",
+      "/placeholders/templates/product-ad-2.svg",
+      "/placeholders/templates/product-ad-3.svg",
+      "/placeholders/templates/product-ad-4.svg",
+    ],
     make: makeProductAd,
   },
   {
@@ -517,7 +526,12 @@ export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
     tags: ["CHARACTER", "MULTI-MODEL", "I2V"],
     models: ["nano-banana-pro", "grok-imagine-image", "seedream-5-pro", "kling-3.0"],
     accent: "#818cf8",
-    preview: ["/placeholders/avatar.svg", PH(1), PH(2), PH(3)],
+    preview: [
+      "/placeholders/templates/character-set-1.svg",
+      "/placeholders/templates/character-set-2.svg",
+      "/placeholders/templates/character-set-3.svg",
+      "/placeholders/templates/character-set-4.svg",
+    ],
     make: makeCharacterSet,
   },
   {
@@ -531,7 +545,12 @@ export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
     tags: ["BRIEF → CAMPAIGN", "MULTI-FORMAT", "BRANCH"],
     models: ["assistant", "gpt-image-2", "seedream-5-lite", "nano-banana-2", "seedance-2-mini"],
     accent: "#FBBF24",
-    preview: [PH(2), PH(4), PH(1), PH(3)],
+    preview: [
+      "/placeholders/templates/campaign-kit-1.svg",
+      "/placeholders/templates/campaign-kit-2.svg",
+      "/placeholders/templates/campaign-kit-3.svg",
+      "/placeholders/templates/campaign-kit-4.svg",
+    ],
     make: makeCampaignKit,
   },
   {
@@ -545,7 +564,12 @@ export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
     tags: ["STORYBOARD", "FIRST/LAST FRAME"],
     models: ["seedream-5-lite", "veo3_fast"],
     accent: "#22d3ee",
-    preview: [PH(1), PH(4), PH(2), PH(3)],
+    preview: [
+      "/placeholders/templates/scene-transition-1.svg",
+      "/placeholders/templates/scene-transition-2.svg",
+      "/placeholders/templates/scene-transition-3.svg",
+      "/placeholders/templates/scene-transition-4.svg",
+    ],
     make: makeSceneTransition,
   },
   {
@@ -559,7 +583,12 @@ export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
     tags: ["VIDEO EDIT", "VIDEO + IMAGE REF"],
     models: ["seedance-2-5-edit"],
     accent: "#a78bfa",
-    preview: [PH(4), PH(2), PH(1), PH(3)],
+    preview: [
+      "/placeholders/templates/clip-remix-1.svg",
+      "/placeholders/templates/clip-remix-2.svg",
+      "/placeholders/templates/clip-remix-3.svg",
+      "/placeholders/templates/clip-remix-4.svg",
+    ],
     make: makeClipRemix,
   },
   {
@@ -573,7 +602,12 @@ export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
     tags: ["MOTION CONTROL", "VIDEO → VIDEO"],
     models: ["kling-2.6-motion-control"],
     accent: "#f472b6",
-    preview: ["/placeholders/avatar.svg", PH(3), PH(1), PH(2)],
+    preview: [
+      "/placeholders/templates/motion-transfer-1.svg",
+      "/placeholders/templates/motion-transfer-2.svg",
+      "/placeholders/templates/motion-transfer-3.svg",
+      "/placeholders/templates/motion-transfer-4.svg",
+    ],
     make: makeMotionTransfer,
   },
   {
@@ -586,7 +620,12 @@ export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
     tags: ["BATCH", "AVATAR", "4 × IMAGE → VIDEO"],
     models: ["nano-banana-pro", "seedance-2"],
     accent: "#5EEAD4",
-    preview: [PH(1), PH(2), PH(3), PH(4)],
+    preview: [
+      "/placeholders/templates/ugc-repurposer-1.svg",
+      "/placeholders/templates/ugc-repurposer-2.svg",
+      "/placeholders/templates/ugc-repurposer-3.svg",
+      "/placeholders/templates/ugc-repurposer-4.svg",
+    ],
     legacy: true,
     make: makeUGCTemplate,
   },

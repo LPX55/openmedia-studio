@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Style reference cel-shaded frame">
+  <rect width="160" height="160" fill="#0C0F16"/>
+  <!-- Style reference frame -->
+  <rect x="20" y="36" width="96" height="88" rx="5" fill="#141820" stroke="#a78bfa" stroke-width="1.6"/>
+  <!-- Two flat cel lighting bands -->
+  <polygon points="21,37 115,37 115,78 21,94" fill="#a78bfa" fill-opacity="0.18"/>
+  <!-- Flat cel-shaded subject silhouette locked to source blocking -->
+  <circle cx="68" cy="66" r="13" fill="#a78bfa"/>
+  <path d="M46 114 C46 92 56 84 68 84 C80 84 90 92 90 114 Z" fill="#a78bfa" fill-opacity="0.85"/>
+  <!-- 4-color palette swatches on right -->
+  <rect x="124" y="36" width="16" height="18" rx="3" fill="#a78bfa"/>
+  <rect x="124" y="59" width="16" height="18" rx="3" fill="#a78bfa" fill-opacity="0.45" stroke="#a78bfa" stroke-width="1"/>
+  <rect x="124" y="82" width="16" height="18" rx="3" fill="#1B212C" stroke="#3A4356" stroke-width="1.2"/>
+  <rect x="124" y="106" width="16" height="18" rx="3" fill="#141820" stroke="#2A3140" stroke-width="1.2"/>
+</svg>

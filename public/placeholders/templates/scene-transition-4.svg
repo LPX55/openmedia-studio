@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Scene B night harbour landscape with key lamp">
+  <rect width="160" height="160" fill="#0C0F16"/>
+  <!-- 16:9 Landscape frame (Scene B — Night) -->
+  <rect x="20" y="38" width="120" height="84" rx="5" fill="#0C0F16" stroke="#22d3ee" stroke-width="1.5"/>
+  <!-- Streetlamp key light cone -->
+  <polygon points="48,53 28,118 68,118" fill="#22d3ee" fill-opacity="0.14"/>
+  <!-- Horizon line -->
+  <line x1="20" y1="85" x2="140" y2="85" stroke="#2A3140" stroke-width="1.4"/>
+  <!-- Lit streetlamp on left third -->
+  <line x1="48" y1="54" x2="48" y2="85" stroke="#3A4356" stroke-width="1.8"/>
+  <circle cx="48" cy="53" r="4.5" fill="#22d3ee"/>
+  <!-- Lamp reflection bars on water -->
+  <line x1="42" y1="94" x2="54" y2="94" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"/>
+  <line x1="44" y1="101" x2="52" y2="101" stroke="#22d3ee" stroke-opacity="0.6" stroke-width="1.6" stroke-linecap="round"/>
+  <!-- Slightly shifted boat + low mist band from right -->
+  <polygon points="78,83 120,83 114,92 84,92" fill="#1B212C" stroke="#3A4356" stroke-width="1.3"/>
+  <rect x="86" y="77" width="52" height="5" rx="2.5" fill="#22d3ee" fill-opacity="0.28"/>
+</svg>

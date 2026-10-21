@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Landscape transition dissolve band">
+  <rect width="160" height="160" fill="#0C0F16"/>
+  <!-- Left landscape frame (Scene A) -->
+  <rect x="16" y="42" width="60" height="76" rx="4" fill="#1B212C" stroke="#3A4356" stroke-width="1.4"/>
+  <line x1="16" y1="84" x2="76" y2="84" stroke="#3A4356" stroke-width="1.2"/>
+  <!-- Right landscape frame (Scene B) -->
+  <rect x="84" y="42" width="60" height="76" rx="4" fill="#141820" stroke="#22d3ee" stroke-width="1.5"/>
+  <line x1="84" y1="84" x2="144" y2="84" stroke="#3A4356" stroke-width="1.2"/>
+  <!-- Directional dissolve band bridging the two frames -->
+  <rect x="64" y="38" width="8" height="84" rx="2" fill="#22d3ee" fill-opacity="0.22"/>
+  <rect x="76" y="34" width="8" height="92" rx="2" fill="#22d3ee" fill-opacity="0.55"/>
+  <rect x="88" y="38" width="8" height="84" rx="2" fill="#22d3ee" fill-opacity="0.30"/>
+  <!-- Horizontal interpolation arrow -->
+  <line x1="42" y1="64" x2="116" y2="64" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"/>
+  <polygon points="122,64 113,59 113,69" fill="#22d3ee"/>
+</svg>

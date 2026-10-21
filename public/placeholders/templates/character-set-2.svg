@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Studio 3:4 portrait crop">
+  <defs>
+    <clipPath id="studio-clip">
+      <rect x="44" y="32" width="72" height="96" rx="6"/>
+    </clipPath>
+  </defs>
+  <rect width="160" height="160" fill="#0C0F16"/>
+  <!-- 3:4 studio frame -->
+  <rect x="44" y="32" width="72" height="96" rx="6" fill="#141820" stroke="#3A4356" stroke-width="1.5"/>
+  <g clip-path="url(#studio-clip)">
+    <!-- 45-degree beauty dish key light -->
+    <polygon points="44,32 92,32 116,104 44,104" fill="#818cf8" fill-opacity="0.09"/>
+    <!-- Canonical character bust -->
+    <path d="M54 130 C54 106 65 96 80 96 C95 96 106 106 106 130 Z" fill="#1B212C" stroke="#3A4356" stroke-width="1.5"/>
+    <path d="M66 64 C65 49 81 44 91 52 C98 58 99 70 94 80 C90 86 85 89 80 89 C72 89 67 81 66 71 Z" fill="#1B212C" stroke="#3A4356" stroke-width="1.5"/>
+    <!-- Rim & key highlight on left contour -->
+    <path d="M84 48 C74 47 66 53 66 65 C66 76 71 86 78 88 M56 126 C57 109 66 99 78 97" fill="none" stroke="#818cf8" stroke-width="2.2" stroke-linecap="round"/>
+  </g>
+</svg>

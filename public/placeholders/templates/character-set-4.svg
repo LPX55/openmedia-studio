@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Vertical 9:16 portrait and head-turn motion">
+  <defs>
+    <clipPath id="street-clip">
+      <rect x="50" y="30" width="60" height="100" rx="5"/>
+    </clipPath>
+  </defs>
+  <rect width="160" height="160" fill="#0C0F16"/>
+  <!-- 9:16 vertical frame -->
+  <rect x="50" y="30" width="60" height="100" rx="5" fill="#141820" stroke="#3A4356" stroke-width="1.4"/>
+  <g clip-path="url(#street-clip)">
+    <!-- Low diagonal sun band from camera right -->
+    <polygon points="110,42 110,88 50,118 50,76" fill="#818cf8" fill-opacity="0.12"/>
+    <!-- Half-body silhouette of same subject -->
+    <path d="M58 132 C58 104 67 94 80 94 C93 94 102 104 102 132 Z" fill="#1B212C" stroke="#3A4356" stroke-width="1.4"/>
+    <path d="M69 68 C68 56 81 52 89 58 C95 63 96 73 91 81 C88 86 84 88 80 88 C74 88 70 81 69 73 Z" fill="#1B212C" stroke="#818cf8" stroke-width="1.6"/>
+    <!-- Head-turn rotation arc -->
+    <path d="M62 72 A22 9 0 0 0 98 72" fill="none" stroke="#818cf8" stroke-width="1.8" stroke-linecap="round"/>
+    <polygon points="100,70 93,69 96,76" fill="#818cf8"/>
+  </g>
+</svg>

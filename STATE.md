@@ -1,11 +1,39 @@
 # STATE
-status: done        # active | paused | blocked | done
-focus: workflow template pack shipped on feat/pluggable-providers at ce18cba — 7 templates (6 new + legacy UGC), gallery with per-template art, offline validator (623 assertions), idle-format hints on empty generator nodes; nothing pushed
-next: get approval to run one template live end-to-end (image + video spend); then push/merge; open items — unverified kie apiIds for the 10 new catalog rows, "Assets" nav placeholder, retry hardening, dead kieJobPoller
-blockers: none
+status: active      # active | paused | blocked | done
+focus: OpenRouter VIDEO lane verified live on feat/pluggable-providers — grok-1.5 and seedance-mini both produced real clips through /api/generate-video; per-model generate_audio declared where upstream supports it (seedance/hailuo/wan), omitted where it does not (grok)
+next: push this lane commit; then decide template E2E path — OR video needs public frame URLs (kie-style upload does not exist upstream), so templates still need either a kie key or a public media host; open items — unverified kie apiIds for the 10 new catalog rows, "Assets" nav placeholder, retry hardening, dead kieJobPoller
+blockers: none (OR key capped at $1/day — $0.34 left today; expires ~2026-10-21)
 updated: 2026-10-21
 
 ## Notes
+
+- 2026-10-21 — OPENROUTER VIDEO LANE OPENED AND VERIFIED LIVE (not just offline):
+  three real jobs through `POST /api/generate-video` with `providerId: "openrouter"`,
+  zero code paths bypassed. (1) seedance-2-mini 4 s @ 480p prompt-only — submitted
+  (202 + polling_url), polled, then FAILED upstream: "output audio may be related
+  to copyright restrictions". (2) grok-imagine-1.5 4 s @ 480p from a first frame —
+  done in ~30 s, 544×544 h264 + AAC. (3) after the audio fix, seedance-mini same
+  prompt — done, 864×496 h264, NO audio stream, ~$0.11. Costs from the live key:
+  $0.7676 spent today, $0.34 of the $1/day cap left; grok 480p = 8¢/s + 1¢/image
+  input (a 4 s job = $0.33), seedance = token-metered $0.0000035/token.
+  THE REAL FINDING: `generate_audio` is a PER-MODEL fact in the live
+  `/api/v1/videos/models` record — `true` (seedance fast/mini, hailuo-3, wan-2.6,
+  veo-3.1-lite), `false` (hailuo-3-max, no audio at all), `null` (grok-1.5 —
+  always renders audio, no parameter; `allowed_passthrough_parameters: []`).
+  Declaring it where upstream accepts it fixes a genuine failure mode: the
+  seedance job that died on the audio-copyright policy returned a clean
+  video-only clip once `sound:false` actually reached the router. An earlier
+  grok edit that declared the field was reverted — sending a parameter the model
+  does not have is exactly the "params only on a needs basis" rule. Verified
+  offline first with a mocked-fetch capture script (`tsx`, no spend) that prints
+  the exact outgoing body per model, so the live run was never the first
+  evidence. STILL A GAP FOR TEMPLATES: OR video stages media as "remote-url"
+  and upstream has NO upload endpoint, so a local `/generated/images/…` cannot
+  feed a video node — grok only ran because a still was uploaded to the
+  Pollinations media store by hand first. Template graphs therefore still
+  resolve to kie bindings (which upload natively) unless a public media host
+  exists. Validated: tsc exit 0, `check:workflows` 623 assertions, eslint clean
+  on the touched file.
 
 - 2026-10-21 — WORKFLOW TEMPLATE PACK shipped in four commits on
   `feat/pluggable-providers`: `fd886a4` (pack + validator + gallery + R2-thumbnail

@@ -1020,6 +1020,11 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
         duration: OR_VIDEO_FIELDS.duration,
         resolution: OR_VIDEO_FIELDS.resolution,
         aspect_ratio: OR_VIDEO_FIELDS.aspect_ratio,
+        // Seedance renders audio by default (`generate_audio: true` in the
+        // live model record) and the upstream policy REJECTS some clips for
+        // audio copyright — without this field the catalog's sound toggle
+        // could not turn it off (verified live on the mini variant).
+        generate_audio: OR_VIDEO_FIELDS.generate_audio,
         frame_images: OR_VIDEO_FIELDS.frame_images,
         input_references: OR_VIDEO_FIELDS.input_references,
       },
@@ -1054,6 +1059,7 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
         resolution: OR_VIDEO_FIELDS.resolution,
         aspect_ratio: OR_VIDEO_FIELDS.aspect_ratio,
         seed: OR_VIDEO_FIELDS.seed,
+        generate_audio: OR_VIDEO_FIELDS.generate_audio,
         frame_images: OR_VIDEO_FIELDS.frame_images,
         input_references: OR_VIDEO_FIELDS.input_references,
       },
@@ -1087,6 +1093,7 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
         duration: OR_VIDEO_FIELDS.duration,
         resolution: OR_VIDEO_FIELDS.resolution,
         aspect_ratio: OR_VIDEO_FIELDS.aspect_ratio,
+        generate_audio: OR_VIDEO_FIELDS.generate_audio,
         frame_images: OR_VIDEO_FIELDS.frame_images,
         input_references: OR_VIDEO_FIELDS.input_references,
       },
@@ -1147,6 +1154,7 @@ const openRouterVideoBindings: ModelProviderBinding[] = [
         duration: OR_VIDEO_FIELDS.duration,
         resolution: OR_VIDEO_FIELDS.resolution,
         aspect_ratio: OR_VIDEO_FIELDS.aspect_ratio,
+        generate_audio: OR_VIDEO_FIELDS.generate_audio,
         frame_images: OR_VIDEO_FIELDS.frame_images,
       },
       maxFrames: 1,

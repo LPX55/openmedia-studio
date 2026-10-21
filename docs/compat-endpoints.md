@@ -24,9 +24,9 @@ without a key (negative case). Record date + model used for each confirmation.
 |---|---|---|---|
 | `google/veo-3.1-lite` | 16:9/9:16, 720p/1080p, dur 8/4/6s, first+last frame, audio | per-second + resolution tiers — record at binding time | binding in place, NOT live-tested |
 | `google/veo-3.1` (implied family) | via catalog `veo3` entry | — | catalog-only, needs binding |
-| `x-ai/grok-imagine-video-1.5` + `-lite` | 16:9/9:16/1:1/4:3/3:2, 480p/720p/1080p, dur 1–15s, first frame | per-second tiers — record at binding time | binding in place, NOT live-tested |
+| `x-ai/grok-imagine-video-1.5` + `-lite` | 16:9/9:16/1:1/4:3/3:2, 480p/720p/1080p, dur 1–15s, first frame | 480p 8¢/s, 720p 14¢/s, 1080p 25¢/s + 1¢ per image input | **LIVE 2026-10-21** ✓ 4 s @ 480p from a first frame = $0.33. Renders audio ALWAYS (`generate_audio: null` upstream — no toggle, so the field is deliberately not declared). Output aspect follows the frame, not `aspect_ratio`. |
 | `kling-3.0-std` / `kling-3.0-pro` | 720p, dur 3–15s, first+last frame, audio | per-second — record at binding time | binding in place, NOT live-tested |
-| `bytedance/seedance-2.0-fast` / `-mini` | 480p/720p, dur 4–15s, first+last frame | token-metered — record at binding time | binding in place, NOT live-tested |
+| `bytedance/seedance-2.0-fast` / `-mini` | 480p/720p, dur 4–15s, first+last frame, audio DEFAULT ON | token-metered $0.0000035/token ($0.0000021 with video input) | **LIVE 2026-10-21** ✓ 4 s @ 480p = ~$0.11. Audio-on default tripped the upstream audio-copyright policy once ⇒ `generate_audio` is now declared on both bindings; `sound:false` returns a video-only container. |
 | `minimax/hailuo-3` / `-max` | 480p/768p (`-max`), dur 5–15s, first+last frame | per-second tiers — record at binding time | binding in place, NOT live-tested |
 | `alibaba/wan-2.6` | 16:9/9:16, 720p/1082p-class, dur 5/10s, first frame | per-second tiers — record at binding time | binding in place, NOT live-tested |
 | `black-forest-labs/flux-video-edit` / `-upscale` | edit/upscale variants, caps vary | per-second — record at binding time | binding in place, NOT live-tested |
@@ -37,8 +37,28 @@ without a key (negative case). Record date + model used for each confirmation.
 > now serves the video dialect too — `POST {base}/v1/videos` (202 + `polling_url`),
 > the poll at `polling_url`, the bytes at `…/content?index=0` (bearer). The 12
 > OpenRouter video bindings are code-defined (`lib/providers/bindings.ts`); the
-> caps above are enforced per binding (duration re-clamp, tier drop). Pricing is
-> still UNCAPTURED ⇒ the cost of a live test is UNVERIFIED.
+> caps above are enforced per binding (duration re-clamp, tier drop).
+>
+> **Lane verified live 2026-10-21** (grok-1.5 4 s @ 480p $0.33; seedance-mini
+> 4 s @ 480p ~$0.11; $1/day key cap, $0.77 spent). What the two runs proved,
+> beyond "it submits":
+>
+> - **The pipeline is whole**: `202 + polling_url` → 3 s poll loop → settle →
+>   `…/content?index=0` downloaded and mirrored into `MEDIA_DIR`, `generations`
+>   row updated, `/generated/videos/…` served. No manual intervention.
+> - **`generate_audio` is a per-model fact, not a dialect default.** The live
+>   `/videos/models` record lists it as `true` (seedance, hailuo-3, wan-2.6,
+>   veo-3.1-lite), `false` (hailuo-3-max — no audio at all) or `null`
+>   (grok-1.5 — audio always, no parameter). Only the `true`/`false` rows
+>   declare the field; declaring it on grok changes nothing and was reverted.
+> - **Audio-on default is a real failure mode**: a seedance job died with
+>   "output audio may be related to copyright restrictions" before the flag was
+>   declared, and the same prompt returned a video-only clip after it.
+> - **Frame staging is the remaining gap for templates**: `mediaStaging:
+>   "remote-url"` means a local `/generated/images/…` still cannot feed a video
+>   node — grok needed a publicly uploaded frame (Pollinations media store) to
+>   run at all. Template graphs therefore still depend on a kie binding, which
+>   uploads natively.
 
 | Backend | Base URL | Basis | Gap to confirmed |
 |---|---|---|---|

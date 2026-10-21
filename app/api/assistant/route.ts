@@ -61,7 +61,9 @@ export async function POST(req: NextRequest) {
     azureModelName?: string;
   };
 
-  const model = body.model ?? "claude-sonnet-4-6";
+  const chatCred = getChatCredential();
+  const clientModel = typeof body.model === "string" ? body.model.trim() : "";
+  const model = clientModel || chatCred.model || "claude-sonnet-4-6";
   const systemPrompt = resolveSystemPrompt(body.systemPromptOverride);
 
   let messages: Message[];
@@ -87,7 +89,6 @@ export async function POST(req: NextRequest) {
   // Kie.ai / Azure credentials (it may point at any OpenAI-compatible endpoint
   // via its base URL). Without it, the Kie.ai / Azure behaviour below is
   // completely unchanged.
-  const chatCred = getChatCredential();
   if (chatCred.apiKey) {
     const base = (chatCred.baseUrl ?? DEFAULT_CHAT_BASE_URL).replace(/\/+$/, "");
     // `azure-auto` is an Azure model-router name; for an OpenAI-compatible

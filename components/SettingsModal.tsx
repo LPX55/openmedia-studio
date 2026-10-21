@@ -4,6 +4,7 @@ import { IMAGE_MODELS, VIDEO_MODELS } from "@/lib/modelConfig";
 import { MODEL_GROUPS } from "@/lib/models";
 import { useWorkflowStore } from "@/lib/store";
 import { PROVIDERS, ProviderId, providerMeta, loadModelProviders, saveModelProviders, getModelProvider, getAzureDeployments, getAzureBaseUrl, refreshProviderBootstrap, enabledProvidersForModel } from "@/lib/providers";
+import { OPENROUTER_BASE_URL, POLLINATIONS_BASE_URL } from "@/lib/providers/bindings";
 import { ProviderBrandIcon } from "@/components/ui/ProviderIcon";
 
 /* ─── Provider options (re-exported for backwards compat) ───────────────────── */
@@ -1839,6 +1840,41 @@ function DebugPanel() {
 /* ─── Assistant panel ────────────────────────────────────────────────────────── */
 
 const CHAT_PROVIDER_ID = "chat";
+const OPENAI_CHAT_BASE_URL = "https://api.openai.com/v1";
+const POLLINATIONS_CHAT_BASE_URL = `${POLLINATIONS_BASE_URL.replace(/\/+$/, "")}/v1`;
+
+type ChatPresetId = "openai" | "openrouter" | "pollinations" | "custom";
+
+const CHAT_PRESETS: readonly {
+  id: ChatPresetId;
+  label: string;
+  baseUrl: string | null;
+  defaultModel: string;
+}[] = [
+  { id: "openai",       label: "OpenAI",       baseUrl: OPENAI_CHAT_BASE_URL,       defaultModel: "gpt-4o-mini" },
+  { id: "openrouter",   label: "OpenRouter",   baseUrl: OPENROUTER_BASE_URL,        defaultModel: "openai/gpt-4o-mini" },
+  { id: "pollinations", label: "Pollinations", baseUrl: POLLINATIONS_CHAT_BASE_URL, defaultModel: "openai" },
+  { id: "custom",       label: "Custom",       baseUrl: null,                       defaultModel: "gpt-4o-mini" },
+];
+
+function resolveChatPreset(
+  storedPreset: string | undefined,
+  baseUrl: string | null | undefined,
+): ChatPresetId {
+  if (
+    storedPreset === "openai" ||
+    storedPreset === "openrouter" ||
+    storedPreset === "pollinations" ||
+    storedPreset === "custom"
+  ) {
+    return storedPreset;
+  }
+  const norm = (baseUrl ?? "").trim().replace(/\/+$/, "");
+  if (!norm || norm === OPENAI_CHAT_BASE_URL) return "openai";
+  if (norm === OPENROUTER_BASE_URL) return "openrouter";
+  if (norm === POLLINATIONS_CHAT_BASE_URL) return "pollinations";
+  return "custom";
+}
 
 /**
  * The Assistant settings: the BYOK chat credential (server-side, via the
@@ -1849,26 +1885,43 @@ function AssistantPanel() {
   const customSystemPrompt = useWorkflowStore((s) => s.customSystemPrompt);
   const setCustomSystemPrompt = useWorkflowStore((s) => s.setCustomSystemPrompt);
 
-  const [keyInput, setKeyInput]       = useState("");
+  const [preset, setPreset]             = useState<ChatPresetId>("openai");
+  const [keyInput, setKeyInput]         = useState("");
   const [baseUrlInput, setBaseUrlInput] = useState("");
-  const [savingKey, setSavingKey]     = useState(false);
-  const [savingUrl, setSavingUrl]     = useState(false);
-  const [error, setError]             = useState<string | null>(null);
-  const [keyStatus, setKeyStatus]     = useState<"unknown" | "set" | "unset">("unknown");
+  const [modelInput, setModelInput]     = useState("");
+  const [savingKey, setSavingKey]       = useState(false);
+  const [savingUrl, setSavingUrl]       = useState(false);
+  const [savingModel, setSavingModel]   = useState(false);
+  const [error, setError]               = useState<string | null>(null);
+  const [keyStatus, setKeyStatus]       = useState<"unknown" | "set" | "unset">("unknown");
   const [savedBaseUrl, setSavedBaseUrl] = useState("");
+  const [savedModel, setSavedModel]     = useState("");
+
+  const syncFromStore = useCallback((syncDrafts: boolean) => {
+    const status = useWorkflowStore.getState().providerStatus[CHAT_PROVIDER_ID];
+    const nextUrl = status?.baseUrl ?? "";
+    const nextModel = status?.chatModel ?? "";
+    const nextPreset = resolveChatPreset(status?.chatPreset, nextUrl);
+    setKeyStatus(status?.hasKey ? "set" : "unset");
+    setSavedBaseUrl(nextUrl);
+    setSavedModel(nextModel);
+    setPreset(nextPreset);
+    if (syncDrafts) {
+      setBaseUrlInput(nextUrl);
+      setModelInput(nextModel);
+    }
+  }, []);
 
   // Read the stored credential status (the provider bootstrap reports
-  // hasKey/baseUrl for every credential row).
+  // hasKey/baseUrl/chatPreset/chatModel for the chat credential row).
   useEffect(() => {
     let cancelled = false;
     void refreshProviderBootstrap().then(() => {
       if (cancelled) return;
-      const status = useWorkflowStore.getState().providerStatus[CHAT_PROVIDER_ID];
-      setKeyStatus(status?.hasKey ? "set" : "unset");
-      setSavedBaseUrl(status?.baseUrl ?? "");
+      syncFromStore(true);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [syncFromStore]);
 
   const put = async (body: Record<string, unknown>) => {
     const res = await fetch("/api/settings/providers", {
@@ -1881,9 +1934,34 @@ function AssistantPanel() {
       throw new Error(d.error ?? "Failed to save");
     }
     await refreshProviderBootstrap();
-    const status = useWorkflowStore.getState().providerStatus[CHAT_PROVIDER_ID];
-    setKeyStatus(status?.hasKey ? "set" : "unset");
-    setSavedBaseUrl(status?.baseUrl ?? "");
+    syncFromStore(false);
+  };
+
+  const handleSelectPreset = async (nextId: ChatPresetId) => {
+    const chosen = CHAT_PRESETS.find((p) => p.id === nextId) ?? CHAT_PRESETS[0];
+    setPreset(nextId);
+    setError(null);
+    if (chosen.baseUrl !== null) {
+      setBaseUrlInput(chosen.baseUrl);
+      setSavingUrl(true);
+      try {
+        await put({ baseUrl: chosen.baseUrl, chatPreset: nextId });
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to save");
+      } finally {
+        setSavingUrl(false);
+      }
+    } else {
+      setBaseUrlInput(savedBaseUrl);
+      setSavingUrl(true);
+      try {
+        await put({ chatPreset: "custom" });
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to save");
+      } finally {
+        setSavingUrl(false);
+      }
+    }
   };
 
   const handleSaveKey = async () => {
@@ -1909,7 +1987,7 @@ function AssistantPanel() {
       });
       if (!res.ok) throw new Error("Failed to remove the key");
       await refreshProviderBootstrap();
-      setKeyStatus("unset");
+      syncFromStore(false);
       setKeyInput("");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to remove the key");
@@ -1922,14 +2000,33 @@ function AssistantPanel() {
     setSavingUrl(true);
     setError(null);
     try {
-      await put({ baseUrl: url });
-      setBaseUrlInput("");
+      await put({ baseUrl: url, chatPreset: "custom" });
+      setBaseUrlInput(url);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to save");
     } finally {
       setSavingUrl(false);
     }
   };
+
+  const handleSaveModel = async () => {
+    const model = modelInput.trim();
+    if (model === savedModel) return;
+    setSavingModel(true);
+    setError(null);
+    try {
+      await put({ chatModel: model });
+      setModelInput(model);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSavingModel(false);
+    }
+  };
+
+  const activePreset = CHAT_PRESETS.find((p) => p.id === preset) ?? CHAT_PRESETS[0];
+  const urlDirty = baseUrlInput.trim() !== savedBaseUrl;
+  const modelDirty = modelInput.trim() !== savedModel;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "28px" }}>
@@ -1942,143 +2039,270 @@ function AssistantPanel() {
         </p>
       </div>
 
-      {/* ─── BYOK chat key ─────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "10px",
-          padding: "16px",
-          background: "rgba(255,255,255,0.02)",
-          border: "1px solid rgba(255,255,255,0.08)",
-          borderRadius: "12px",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <div>
-            <div style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.85)" }}>Chat API key</div>
-            <div style={{ fontSize: "10px", color: "rgba(255,255,255,0.28)", marginTop: "1px" }}>
-              Your own OpenAI-compatible key for assistant requests
+      {/* ─── BYOK chat key + effective summary ─────────────────────────── */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px",
+            padding: "16px",
+            background: "rgba(255,255,255,0.02)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: "12px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.85)" }}>Chat API key</div>
+              <div style={{ fontSize: "10px", color: "rgba(255,255,255,0.28)", marginTop: "1px" }}>
+                Your own OpenAI-compatible key for assistant requests
+              </div>
             </div>
-          </div>
-          {keyStatus === "set" && (
-            <span
-              style={{
-                marginLeft: "auto", fontSize: "10px", fontWeight: 600,
-                color: "rgba(74,222,128,0.8)", background: "rgba(74,222,128,0.08)",
-                border: "1px solid rgba(74,222,128,0.2)", borderRadius: "5px",
-                padding: "2px 7px", letterSpacing: "0.04em",
-              }}
-            >
-              SAVED
-            </span>
-          )}
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-          <label
-            htmlFor="chat-api-key"
-            style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
-          >
-            API Key
-          </label>
-          {keyStatus === "set" ? (
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <input
-                id="chat-api-key"
-                type="password"
-                value="placeholdertoken"
-                readOnly
-                style={{ ...INPUT_STYLE, flex: 1, cursor: "default", color: "rgba(255,255,255,0.3)" }}
-              />
-              <button
-                onClick={handleRemoveKey}
+            {keyStatus === "set" && (
+              <span
                 style={{
-                  padding: "7px 12px", borderRadius: "7px", border: "1px solid rgba(239,68,68,0.3)",
-                  background: "rgba(239,68,68,0.06)", color: "rgba(239,68,68,0.7)",
-                  cursor: "pointer", fontSize: "12px", fontWeight: 500, whiteSpace: "nowrap",
+                  marginLeft: "auto", fontSize: "10px", fontWeight: 600,
+                  color: "rgba(74,222,128,0.8)", background: "rgba(74,222,128,0.08)",
+                  border: "1px solid rgba(74,222,128,0.2)", borderRadius: "5px",
+                  padding: "2px 7px", letterSpacing: "0.04em",
                 }}
               >
-                Remove
-              </button>
+                SAVED
+              </span>
+            )}
+          </div>
+
+          {/* Provider preset picker */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+            <span
+              style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
+            >
+              Provider
+            </span>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                background: "rgba(255,255,255,0.04)",
+                borderRadius: "8px",
+                padding: "3px",
+                gap: "2px",
+                border: "1px solid rgba(255,255,255,0.07)",
+              }}
+            >
+              {CHAT_PRESETS.map((p) => {
+                const active = preset === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    disabled={savingUrl}
+                    onClick={() => void handleSelectPreset(p.id)}
+                    style={{
+                      flex: "1 1 auto",
+                      padding: "5px 10px",
+                      borderRadius: "6px",
+                      border: "none",
+                      cursor: savingUrl ? "default" : "pointer",
+                      fontSize: "11px",
+                      fontWeight: 500,
+                      letterSpacing: "0.01em",
+                      transition: "background 140ms ease, color 140ms ease",
+                      background: active ? "rgba(255,255,255,0.1)" : "transparent",
+                      color: active ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.36)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
             </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            {activePreset.baseUrl && (
+              <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.22)", margin: 0, lineHeight: 1.5, fontFamily: "monospace" }}>
+                {activePreset.baseUrl}
+              </p>
+            )}
+          </div>
+
+          {/* Base URL — revealed only when Custom preset is selected */}
+          {preset === "custom" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+              <label
+                htmlFor="chat-base-url"
+                style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
+              >
+                Base URL <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>(optional)</span>
+              </label>
               <div style={{ display: "flex", gap: "8px" }}>
                 <input
-                  id="chat-api-key"
-                  type="password"
-                  placeholder="Paste your chat API key"
-                  value={keyInput}
-                  onChange={(e) => setKeyInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") void handleSaveKey(); }}
+                  id="chat-base-url"
+                  type="url"
+                  placeholder={savedBaseUrl || OPENAI_CHAT_BASE_URL}
+                  value={baseUrlInput}
+                  onChange={(e) => setBaseUrlInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void handleSaveBaseUrl(); }}
                   style={{ ...INPUT_STYLE, flex: 1 }}
                   onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"; }}
                   onBlur={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
                 />
                 <button
-                  onClick={handleSaveKey}
-                  disabled={!keyInput.trim() || savingKey}
+                  onClick={handleSaveBaseUrl}
+                  disabled={savingUrl || !urlDirty}
                   style={{
                     padding: "7px 14px", borderRadius: "7px", border: "none",
-                    background: keyInput.trim() ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
-                    color: keyInput.trim() ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.25)",
-                    cursor: keyInput.trim() ? "pointer" : "default",
+                    background: urlDirty ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
+                    color: urlDirty ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.25)",
+                    cursor: urlDirty ? "pointer" : "default",
                     fontSize: "12px", fontWeight: 500, whiteSpace: "nowrap",
                   }}
                 >
-                  {savingKey ? "Saving…" : "Save"}
+                  {savingUrl ? "Saving…" : "Save"}
                 </button>
               </div>
               <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", margin: 0, lineHeight: 1.5 }}>
-                Stored on the server — it is never exposed to the browser.
+                Any OpenAI-compatible endpoint. Leave empty to use the default.
               </p>
             </div>
           )}
-        </div>
 
-        {/* Base URL — optional; defaults to the OpenAI-compatible endpoint */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-          <label
-            htmlFor="chat-base-url"
-            style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
-          >
-            Base URL <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>(optional)</span>
-          </label>
-          <div style={{ display: "flex", gap: "8px" }}>
-            <input
-              id="chat-base-url"
-              type="url"
-              placeholder={savedBaseUrl || "https://api.openai.com/v1"}
-              value={baseUrlInput}
-              onChange={(e) => setBaseUrlInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") void handleSaveBaseUrl(); }}
-              style={{ ...INPUT_STYLE, flex: 1 }}
-              onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"; }}
-              onBlur={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
-            />
-            <button
-              onClick={handleSaveBaseUrl}
-              disabled={savingUrl || baseUrlInput.trim() === savedBaseUrl}
-              style={{
-                padding: "7px 14px", borderRadius: "7px", border: "none",
-                background: baseUrlInput.trim() && baseUrlInput.trim() !== savedBaseUrl ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
-                color: baseUrlInput.trim() && baseUrlInput.trim() !== savedBaseUrl ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.25)",
-                cursor: baseUrlInput.trim() && baseUrlInput.trim() !== savedBaseUrl ? "pointer" : "default",
-                fontSize: "12px", fontWeight: 500, whiteSpace: "nowrap",
-              }}
+          {/* Model — free-text input with per-provider placeholder */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+            <label
+              htmlFor="chat-model"
+              style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
             >
-              {savingUrl ? "Saving…" : "Save"}
-            </button>
+              Model <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>(optional)</span>
+            </label>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <input
+                id="chat-model"
+                type="text"
+                placeholder={activePreset.defaultModel}
+                value={modelInput}
+                onChange={(e) => setModelInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void handleSaveModel(); }}
+                style={{ ...INPUT_STYLE, flex: 1 }}
+                onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"; }}
+                onBlur={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
+              />
+              <button
+                onClick={handleSaveModel}
+                disabled={savingModel || !modelDirty}
+                style={{
+                  padding: "7px 14px", borderRadius: "7px", border: "none",
+                  background: modelDirty ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
+                  color: modelDirty ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.25)",
+                  cursor: modelDirty ? "pointer" : "default",
+                  fontSize: "12px", fontWeight: 500, whiteSpace: "nowrap",
+                }}
+              >
+                {savingModel ? "Saving…" : "Save"}
+              </button>
+            </div>
+            <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", margin: 0, lineHeight: 1.5 }}>
+              Default model ID when the caller does not specify one (e.g. {activePreset.defaultModel}).
+            </p>
           </div>
-          <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", margin: 0, lineHeight: 1.5 }}>
-            Any OpenAI-compatible endpoint. Leave empty to use the default.
-          </p>
+
+          {/* API Key */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+            <label
+              htmlFor="chat-api-key"
+              style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
+            >
+              API Key
+            </label>
+            {keyStatus === "set" ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <input
+                  id="chat-api-key"
+                  type="password"
+                  value="placeholdertoken"
+                  readOnly
+                  style={{ ...INPUT_STYLE, flex: 1, cursor: "default", color: "rgba(255,255,255,0.3)" }}
+                />
+                <button
+                  onClick={handleRemoveKey}
+                  style={{
+                    padding: "7px 12px", borderRadius: "7px", border: "1px solid rgba(239,68,68,0.3)",
+                    background: "rgba(239,68,68,0.06)", color: "rgba(239,68,68,0.7)",
+                    cursor: "pointer", fontSize: "12px", fontWeight: 500, whiteSpace: "nowrap",
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <input
+                    id="chat-api-key"
+                    type="password"
+                    placeholder="Paste your chat API key"
+                    value={keyInput}
+                    onChange={(e) => setKeyInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void handleSaveKey(); }}
+                    style={{ ...INPUT_STYLE, flex: 1 }}
+                    onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"; }}
+                    onBlur={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
+                  />
+                  <button
+                    onClick={handleSaveKey}
+                    disabled={!keyInput.trim() || savingKey}
+                    style={{
+                      padding: "7px 14px", borderRadius: "7px", border: "none",
+                      background: keyInput.trim() ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
+                      color: keyInput.trim() ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.25)",
+                      cursor: keyInput.trim() ? "pointer" : "default",
+                      fontSize: "12px", fontWeight: 500, whiteSpace: "nowrap",
+                    }}
+                  >
+                    {savingKey ? "Saving…" : "Save"}
+                  </button>
+                </div>
+                <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", margin: 0, lineHeight: 1.5 }}>
+                  Stored on the server — it is never exposed to the browser.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <p style={{ fontSize: "11px", color: "rgba(239,68,68,0.7)", margin: 0 }}>{error}</p>
+          )}
         </div>
 
-        {error && (
-          <p style={{ fontSize: "11px", color: "rgba(239,68,68,0.7)", margin: 0 }}>{error}</p>
-        )}
+        {/* Effective-config summary line */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "0 4px",
+            fontSize: "11px",
+            color: "rgba(255,255,255,0.4)",
+            lineHeight: 1.5,
+            flexWrap: "wrap",
+          }}
+        >
+          <span>Assistant →</span>
+          <span style={{ color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>{activePreset.label}</span>
+          <span>·</span>
+          <span style={{ color: "rgba(255,255,255,0.7)", fontFamily: "monospace", fontSize: "10.5px" }}>
+            {savedModel || "claude-sonnet-4-6 (default)"}
+          </span>
+          <span>·</span>
+          <span
+            style={{
+              color: keyStatus === "set" ? "rgba(74,222,128,0.8)" : "rgba(255,255,255,0.35)",
+            }}
+          >
+            {keyStatus === "set" ? "key saved" : "key missing"}
+          </span>
+        </div>
       </div>
 
       {/* ─── Custom system prompt ──────────────────────────────────────── */}

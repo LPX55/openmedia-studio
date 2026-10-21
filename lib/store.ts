@@ -170,6 +170,10 @@ export interface ProviderStatusEntry {
   keySource?: string;
   /** The provider-level param preset id (compat-plan §c) — "" when unset. */
   presetId?: string;
+  /** Assistant BYOK provider preset ("openai" | "openrouter" | "pollinations" | "custom" | "") when id === "chat". */
+  chatPreset?: string;
+  /** Assistant BYOK default model id when id === "chat". */
+  chatModel?: string;
 }
 
 export type ProviderStatusMap = Record<string, ProviderStatusEntry>;
@@ -228,6 +232,8 @@ interface WorkflowStore {
       baseUrl?: string | null;
       keySource?: string;
       presetId?: string;
+      chatPreset?: string;
+      chatModel?: string;
     }>;
     modelPrefs?: Record<string, string>;
     bindingsByModel?: Record<string, string[]>;
@@ -826,6 +832,8 @@ export const useWorkflowStore = create<WorkflowStore>()(
                 baseUrl:     p.baseUrl ?? null,
                 keySource:   p.keySource,
                 presetId:    p.presetId ?? "",
+                ...(p.chatPreset !== undefined ? { chatPreset: p.chatPreset } : {}),
+                ...(p.chatModel  !== undefined ? { chatModel: p.chatModel }   : {}),
               };
             }
             return {

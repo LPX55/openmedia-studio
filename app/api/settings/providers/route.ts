@@ -6,6 +6,7 @@ import {
   setProviderBaseUrl,
   setProviderDeployments,
   setProviderPresetId,
+  setProviderChatConfig,
   getParamPresets,
   getParamPreset,
   getModelPrefs,
@@ -79,6 +80,10 @@ interface ProviderReadiness {
   reason?: string;
   /** The provider-level param preset id (compat-plan §c) — "" when unset. */
   presetId: string;
+  /** Assistant BYOK provider preset ("openai" | "openrouter" | "pollinations" | "custom" | "") when id === "chat". */
+  chatPreset?: string;
+  /** Assistant BYOK default model id when id === "chat". */
+  chatModel?: string;
 }
 
 /** A stored param preset (id + family + params) — the picker's data source. */
@@ -151,6 +156,15 @@ export async function GET() {
       deployments,
       ready,
       presetId: typeof cfg.extra.presetId === "string" ? cfg.extra.presetId : "",
+      ...(p.id === "chat"
+        ? {
+            chatPreset: typeof cfg.extra.chatPreset === "string" ? cfg.extra.chatPreset : "",
+            chatModel:
+              typeof cfg.extra.chatModel === "string" && cfg.extra.chatModel.trim()
+                ? cfg.extra.chatModel.trim()
+                : (process.env.CHAT_MODEL?.trim() ?? ""),
+          }
+        : {}),
       ...(reason ? { reason } : {}),
     };
   }
@@ -195,12 +209,24 @@ async function upsertFromBody(req: NextRequest) {
     return NextResponse.json({ error: "body must be an object" }, { status: 400 });
   }
 
-  const { providerId, apiKey, baseUrl, deployments, presetId, modelPrefs, customBindings } = body as {
+  const {
+    providerId,
+    apiKey,
+    baseUrl,
+    deployments,
+    presetId,
+    chatPreset,
+    chatModel,
+    modelPrefs,
+    customBindings,
+  } = body as {
     providerId?: unknown;
     apiKey?: unknown;
     baseUrl?: unknown;
     deployments?: unknown;
     presetId?: unknown;
+    chatPreset?: unknown;
+    chatModel?: unknown;
     modelPrefs?: unknown;
     customBindings?: unknown;
   };
@@ -210,7 +236,9 @@ async function upsertFromBody(req: NextRequest) {
     apiKey != null ||
     baseUrl != null ||
     deployments != null ||
-    presetId != null
+    presetId != null ||
+    chatPreset != null ||
+    chatModel != null
   ) {
     if (typeof providerId !== "string" || !providerId.trim()) {
       return NextResponse.json({ error: "providerId is required" }, { status: 400 });
@@ -227,6 +255,22 @@ async function upsertFromBody(req: NextRequest) {
         return NextResponse.json({ error: "baseUrl must be a string" }, { status: 400 });
       }
       setProviderBaseUrl(pid, baseUrl.trim() || null);
+    }
+    if (chatPreset != null || chatModel != null) {
+      const chatPatch: { chatPreset?: string | null; chatModel?: string | null } = {};
+      if (chatPreset != null) {
+        if (typeof chatPreset !== "string") {
+          return NextResponse.json({ error: "chatPreset must be a string" }, { status: 400 });
+        }
+        chatPatch.chatPreset = chatPreset.trim() || null;
+      }
+      if (chatModel != null) {
+        if (typeof chatModel !== "string") {
+          return NextResponse.json({ error: "chatModel must be a string" }, { status: 400 });
+        }
+        chatPatch.chatModel = chatModel.trim() || null;
+      }
+      setProviderChatConfig(pid, chatPatch);
     }
     if (presetId != null) {
       if (typeof presetId !== "string") {

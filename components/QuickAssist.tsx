@@ -15,6 +15,9 @@ interface Message {
   streaming?: boolean;
 }
 
+/** Monospace stack for raw (non-catalog) model ids. */
+const MONO_FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+
 
 export function QuickAssist() {
   const [open, setOpen] = useState(false);
@@ -22,9 +25,19 @@ export function QuickAssist() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const { preferredModel, setPreferredModel } = useChatSessionStore();
-  const [model, setModel] = useState<ModelId>(preferredModel as ModelId);
+  // The assistant model saved in Settings (server-authoritative). It may only
+  // bootstrap after this component mounted — the effect below adopts it then.
+  const settingsModel = (useWorkflowStore((s) => s.providerStatus.chat?.chatModel) ?? "").trim();
+  // Effective model: an explicit in-session pick wins, then the Settings
+  // assistant model, then the persisted preference, then the catalog default.
+  const [model, setModel] = useState<ModelId>(() =>
+    (settingsModel || preferredModel || "claude-sonnet-4-6") as ModelId
+  );
   const [modelOpen, setModelOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  // Set once the user picks a model in this session — an explicit pick always
+  // beats the Settings default.
+  const pickedRef = useRef(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -39,6 +52,15 @@ export function QuickAssist() {
   // Visibility toggles (declutter) — hidden text models are not offered.
   const disabledModels = useWorkflowStore((s) => s.disabledModels);
   const disabledIds = azureKeySet === true ? [] : ["azure-auto"];
+
+  // Adopt the Settings assistant model once the provider bootstrap delivers it.
+  // Never overrides an explicit in-session pick (there is no restored session
+  // model here — QuickAssist always starts a fresh chat).
+  useEffect(() => {
+    if (!settingsModel) return;
+    if (pickedRef.current) return;
+    setModel(settingsModel as ModelId);
+  }, [settingsModel]);
 
   // Sync to store when streaming stops
   useEffect(() => {
@@ -288,12 +310,31 @@ export function QuickAssist() {
                 <button onClick={() => setModelOpen(o => !o)} style={{ display: "flex", alignItems: "center", gap: "5px", padding: "2px 7px 2px 8px", borderRadius: "6px", background: modelOpen ? "rgba(255,255,255,0.09)" : "transparent", border: "1px solid transparent", fontSize: "10px", color: "rgba(255,255,255,0.35)", fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase", cursor: "pointer", fontFamily: "inherit", transition: "background 120ms, color 120ms" }}
                   onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.09)"; (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.65)"; }}
                   onMouseLeave={e => { if (!modelOpen) { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.35)"; } }}>
-                  {MODELS.find(m => m.id === model)?.label}
+                  {MODELS.find(m => m.id === model)?.label ?? (
+                    <span title={model} style={{ fontFamily: MONO_FONT, textTransform: "none", letterSpacing: "0", maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{model}</span>
+                  )}
                   <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ opacity: 0.6 }}><path d="m6 15 6-6 6 6" /></svg>
                 </button>
                 {modelOpen && (
                   <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: 0, minWidth: "180px", background: "rgba(18,20,23,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "12px", boxShadow: "0 -8px 32px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4)", overflow: "hidden", zIndex: 10, animation: "qaSlideDown 120ms cubic-bezier(0.16,1,0.3,1)" }}>
                     <div style={{ padding: "4px" }}>
+                      {settingsModel && !MODELS.some(m => m.id === settingsModel) && (
+                        <>
+                          <button
+                            onClick={() => { if (!disabledIds.includes(settingsModel)) { pickedRef.current = true; setModel(settingsModel); setPreferredModel(settingsModel); setModelOpen(false); } }}
+                            title={settingsModel}
+                            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "7px 8px", borderRadius: "7px", border: "none", background: model === settingsModel ? "rgba(45,212,191,0.12)" : "transparent", color: model === settingsModel ? "rgba(94,234,212,0.95)" : "rgba(255,255,255,0.7)", fontSize: "13px", fontFamily: "inherit", cursor: "pointer", textAlign: "left", transition: "background 100ms" }}
+                            onMouseEnter={e => { if (model !== settingsModel) (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.06)"; }}
+                            onMouseLeave={e => { if (model !== settingsModel) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}>
+                            <span style={{ display: "inline-flex", alignItems: "baseline", gap: "5px", minWidth: 0 }}>
+                              <span>Settings default —</span>
+                              <span style={{ fontFamily: MONO_FONT, fontSize: "11px", maxWidth: "140px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{settingsModel}</span>
+                            </span>
+                            <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.28)", marginLeft: "8px" }}>Settings</span>
+                          </button>
+                          <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 0" }} />
+                        </>
+                      )}
                       {MODEL_GROUPS.map((group, gi) => (
                         <div key={group.label}>
                           {gi > 0 && <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 0" }} />}
@@ -302,7 +343,7 @@ export function QuickAssist() {
                             const isDisabled = disabledIds.includes(m.id);
                             return (
                             <button key={m.id}
-                              onClick={() => { if (!isDisabled) { setModel(m.id); setPreferredModel(m.id); setModelOpen(false); } }}
+                              onClick={() => { if (!isDisabled) { pickedRef.current = true; setModel(m.id); setPreferredModel(m.id); setModelOpen(false); } }}
                               title={isDisabled ? "Configure Azure in Settings → API Keys" : undefined}
                               style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "7px 8px", borderRadius: "7px", border: "none", background: model === m.id ? "rgba(45,212,191,0.12)" : "transparent", color: isDisabled ? "rgba(255,255,255,0.25)" : model === m.id ? "rgba(94,234,212,0.95)" : "rgba(255,255,255,0.7)", fontSize: "13px", fontFamily: "inherit", cursor: isDisabled ? "not-allowed" : "pointer", textAlign: "left", transition: "background 100ms", opacity: isDisabled ? 0.5 : 1 }}
                               onMouseEnter={e => { if (!isDisabled && model !== m.id) (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.06)"; }}

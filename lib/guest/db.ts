@@ -427,6 +427,32 @@ export function setProviderPresetId(providerId: string, presetId: string | null)
     .run(providerId, JSON.stringify(extra), now());
 }
 
+/**
+ * Stores (or clears) the Assistant BYOK provider preset (`extra_json.chatPreset`)
+ * and/or default model (`extra_json.chatModel`) on a `provider_configs` row.
+ */
+export function setProviderChatConfig(
+  providerId: string,
+  patch: { chatPreset?: string | null; chatModel?: string | null },
+): void {
+  const cfg = getProviderConfig(providerId);
+  const extra = { ...(cfg?.extra ?? {}) };
+  if ("chatPreset" in patch) {
+    if (patch.chatPreset) extra.chatPreset = patch.chatPreset;
+    else delete extra.chatPreset;
+  }
+  if ("chatModel" in patch) {
+    if (patch.chatModel) extra.chatModel = patch.chatModel;
+    else delete extra.chatModel;
+  }
+  db()
+    .prepare(`
+      INSERT INTO provider_configs (provider_id, extra_json, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(provider_id) DO UPDATE SET extra_json = excluded.extra_json, updated_at = excluded.updated_at
+    `)
+    .run(providerId, JSON.stringify(extra), now());
+}
+
 // ── Param presets (compat-plan §c) ───────────────────────────────────────────
 
 /** One stored param preset (the base layer of a compat binding's params). */
@@ -631,11 +657,26 @@ export function getChatApiKey(): string | null {
 /**
  * The full BYOK chat credential: the key plus the optional base URL of the
  * OpenAI-compatible endpoint it belongs to (stored in `provider_configs.base_url`,
- * `CHAT_BASE_URL` as the env fallback).
+ * `CHAT_BASE_URL` as the env fallback), plus the configured provider preset
+ * (`extra_json.chatPreset`) and default model (`extra_json.chatModel`,
+ * `CHAT_MODEL` as the env fallback).
  */
-export function getChatCredential(): { apiKey: string | null; baseUrl: string | null } {
+export function getChatCredential(): {
+  apiKey: string | null;
+  baseUrl: string | null;
+  model: string | null;
+  preset: string | null;
+} {
   const cfg = getProviderRuntimeConfig("chat");
-  return { apiKey: cfg.apiKey, baseUrl: cfg.baseUrl ?? null };
+  const storedModel = typeof cfg.extra.chatModel === "string" ? cfg.extra.chatModel.trim() : "";
+  const storedPreset = typeof cfg.extra.chatPreset === "string" ? cfg.extra.chatPreset.trim() : "";
+  const model = storedModel || process.env.CHAT_MODEL?.trim() || null;
+  return {
+    apiKey: cfg.apiKey,
+    baseUrl: cfg.baseUrl ?? null,
+    model,
+    preset: storedPreset || null,
+  };
 }
 
 export function setAzureApiKey(key: string): void {

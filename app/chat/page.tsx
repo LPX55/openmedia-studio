@@ -24,6 +24,9 @@ function LogoIcon({ size = 40 }: { size?: number }) {
 
 // ── Model picker ──────────────────────────────────────────────────────────────
 
+/** Monospace stack for raw (non-catalog) model ids. */
+const MONO_FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+
 function ModelPicker({
   model, onChange, direction = "up", disabledIds = [],
 }: {
@@ -36,6 +39,11 @@ function ModelPicker({
   const ref = useRef<HTMLDivElement>(null);
   // Visibility toggles (declutter) — hidden text models are not offered.
   const disabledModels = useWorkflowStore((s) => s.disabledModels);
+  // The assistant model saved in Settings — offered as a top entry when it is
+  // not part of the catalog (it is never hidden by the declutter toggles).
+  const settingsModel = (useWorkflowStore((s) => s.providerStatus.chat?.chatModel) ?? "").trim();
+  const hasSettingsEntry = settingsModel !== "" && !MODELS.some(m => m.id === settingsModel);
+  const settingsDisabled = disabledIds.includes(settingsModel);
 
   useEffect(() => {
     function onPointer(e: PointerEvent) {
@@ -64,7 +72,9 @@ function ModelPicker({
           transition: "background 120ms, color 120ms", whiteSpace: "nowrap",
         }}
       >
-        {current?.label}
+        {current?.label ?? (
+          <span title={model} style={{ fontFamily: MONO_FONT, fontSize: "11px", maxWidth: "160px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{model}</span>
+        )}
         <ChevronUp
           size={12}
           style={{
@@ -84,6 +94,35 @@ function ModelPicker({
           boxShadow: "0 8px 32px rgba(0,0,0,0.6)", overflow: "hidden", zIndex: 100,
         }}>
           <div style={{ padding: "4px" }}>
+            {hasSettingsEntry && (
+              <>
+                <button
+                  onClick={() => { if (!settingsDisabled) { onChange(settingsModel); setOpen(false); } }}
+                  title={settingsModel}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    width: "100%", padding: "7px 8px", borderRadius: "7px", border: "none",
+                    background: model === settingsModel ? "rgba(45,212,191,0.12)" : "transparent",
+                    color: settingsDisabled ? "rgba(255,255,255,0.25)" : model === settingsModel ? "rgba(94,234,212,0.95)" : "rgba(255,255,255,0.7)",
+                    fontSize: "13px", fontFamily: "inherit",
+                    cursor: settingsDisabled ? "not-allowed" : "pointer",
+                    textAlign: "left", transition: "background 100ms",
+                    opacity: settingsDisabled ? 0.5 : 1,
+                  }}
+                  onMouseEnter={e => { if (!settingsDisabled && model !== settingsModel) (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.06)"; }}
+                  onMouseLeave={e => { if (!settingsDisabled && model !== settingsModel) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "baseline", gap: "5px", minWidth: 0 }}>
+                    <span>Settings default —</span>
+                    <span style={{ fontFamily: MONO_FONT, fontSize: "11px", maxWidth: "170px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{settingsModel}</span>
+                  </span>
+                  <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.28)", marginLeft: "8px" }}>
+                    Settings
+                  </span>
+                </button>
+                <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 0" }} />
+              </>
+            )}
             {MODEL_GROUPS.map((group, gi) => (
               <div key={group.label}>
                 {gi > 0 && <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 0" }} />}
@@ -313,15 +352,31 @@ function ChatWindow({
   );
   const [input, setInput] = useState("");
   const [model, setModel] = useState<ModelId>((session.model || defaultModel || "claude-sonnet-4-6") as ModelId);
+  // Set once the user picks a model in this session — an explicit pick always
+  // beats the Settings default.
+  const pickedRef = useRef(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const kieKeySet   = useWorkflowStore((s) => s.kieKeySet);
   const azureKeySet = useWorkflowStore((s) => s.azureKeySet);
+  // The assistant model saved in Settings (server-authoritative). It may only
+  // bootstrap after this component mounted — the effect below adopts it then.
+  const settingsModel = (useWorkflowStore((s) => s.providerStatus.chat?.chatModel) ?? "").trim();
   // The user's custom system prompt (Settings → Assistant). Empty ⇒ the
   // server falls back to the built-in lib/systemPrompt.ts default.
   const customSystemPrompt = useWorkflowStore((s) => s.customSystemPrompt);
   const disabledIds = azureKeySet === true ? [] : ["azure-auto"];
 
-  function handleModelChange(id: ModelId) { setModel(id); onModelChange?.(id); }
+  function handleModelChange(id: ModelId) { pickedRef.current = true; setModel(id); onModelChange?.(id); }
+
+  // Adopt the Settings assistant model once the provider bootstrap delivers it.
+  // A restored session keeps its own model, and an explicit in-session pick
+  // always wins — neither is ever clobbered.
+  useEffect(() => {
+    if (!settingsModel) return;
+    if (pickedRef.current) return;
+    if (session.model) return;
+    setModel(settingsModel as ModelId);
+  }, [settingsModel, session.model]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -615,9 +670,21 @@ function ChatInner() {
   const [hydrated, setHydrated] = useState(false);
   const [landingModel, setLandingModel] = useState<ModelId>("claude-sonnet-4-6");
   const [pendingMessage, setPendingMessage] = useState("");
+  // The assistant model saved in Settings (server-authoritative). It may only
+  // bootstrap after this component mounted — the effect below adopts it then.
+  const settingsModel = (useWorkflowStore((s) => s.providerStatus.chat?.chatModel) ?? "").trim();
+  // Set once the user picks a model for the landing view — an explicit pick
+  // always beats the Settings default.
+  const landingPickedRef = useRef(false);
 
-  // Sync landingModel from store once hydrated
-  useEffect(() => { if (hydrated) setLandingModel(preferredModel as ModelId); }, [hydrated]);
+  // Sync landingModel from the store once hydrated: an explicit in-session pick
+  // wins, then the Settings assistant model, then the persisted preference,
+  // then the catalog default.
+  useEffect(() => {
+    if (!hydrated) return;
+    if (landingPickedRef.current) return;
+    setLandingModel((settingsModel || preferredModel || "claude-sonnet-4-6") as ModelId);
+  }, [hydrated, settingsModel, preferredModel]);
 
   useEffect(() => {
     const unsub = useChatSessionStore.persist?.onFinishHydration(() => setHydrated(true));
@@ -648,7 +715,7 @@ function ChatInner() {
           key={activeSession.id}
           session={activeSession}
           onUpdate={(msgs, mdl) => upsertSession(activeSession.id, msgs, mdl)}
-          defaultModel={preferredModel}
+          defaultModel={settingsModel || preferredModel}
           onModelChange={setPreferredModel}
           initialMessage={pendingMessage || undefined}
         />
@@ -656,7 +723,7 @@ function ChatInner() {
         <LandingView
           onSubmit={handleLandingSubmit}
           model={landingModel}
-          onModelChange={id => { setLandingModel(id); setPreferredModel(id); }}
+          onModelChange={id => { landingPickedRef.current = true; setLandingModel(id); setPreferredModel(id); }}
         />
       )}
     </div>

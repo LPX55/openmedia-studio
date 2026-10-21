@@ -1,7 +1,7 @@
 # STATE
 status: done        # active | paused | blocked | done
-focus: Settings trio + debrand landed on feat/pluggable-providers (assistant BYOK 989ba4f, debrand c96db3c); branch ready for review/merge
-next: User call - merge feat/pluggable-providers, workflow automations + experimentation, or next scope item
+focus: Qwen Turbo proven live t2i + i2v (incl auto-ratio fix 9a15a1f) on feat/pluggable-providers; dev server running; ready: workflow automations / next scope
+next: user call — move on to automations (recommended), video leg, or merge
 blockers: none
 updated: 2026-10-21
 

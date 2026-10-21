@@ -18,6 +18,21 @@ without a key (negative case). Record date + model used for each confirmation.
 
 ## Theoretically compatible (docs/schema-verified, NOT live-tested) 🔶
 
+### Video models (verified live 2026-10-21 via `/api/v/videos/models` listing)
+
+| Model | Caps (from live listing) | Pricing | Status |
+|---|---|---|---|
+| `google/veo-3.1-lite` | 16:9/9:16, 720p/1080p, dur 8/4/6s, first+last frame, audio | per-second + resolution tiers — record at binding time | listed, NOT live-tested |
+| `google/veo-3.1` (implied family) | via catalog `veo3` entry | — | catalog-only, needs binding |
+| `x-ai/grok-imagine-video-1.5` + `-lite` | 16:9/9:16/1:1/4:3/3:2, 480p/720p/1080p, dur 1–15s, first frame | per-second tiers — record at binding time | listed, NOT live-tested |
+| `kling-3.0-std` / `kling-3.0-pro` | 720p, dur 3–15s, first+last frame, audio | per-second — record at binding time | listed, NOT live-tested |
+| `bytedance/seedance-2.0-fast` / `-mini` | 480p/720p, dur 4–15s, first+last frame | token-metered — record at binding time | listed, NOT live-tested |
+| `minimax/hailuo-3` / `-max` | 480p/768p (`-max`), dur 5–15s, first+last frame | per-second tiers — record at binding time | listed, NOT live-tested |
+| `alibaba/wan-2.6` | 16:9/9:16, 720p/1082p-class, dur 5/10s, first frame | per-second tiers — record at binding time | listed, NOT live-tested |
+| `black-forest-labs/flux-video-edit` / `-upscale` | edit/upscale variants, caps vary | per-second — record at binding time | listed, NOT live-tested |
+
+> Pricing rule going forward: capture per-model pricing at binding time from the live listing (`pricing_skus`) into the binding comment + this table. The video submit path does not exist yet (adapter is images-only; `/api/generate-video` is kie-only) — bindings are blocked on it, NOT on data.
+
 | Backend | Base URL | Basis | Gap to confirmed |
 |---|---|---|---|
 | OpenRouter images | `https://openrouter.ai/api` | Spike: 10/11 catalog models map to live `/api/v1/images/models` ids; dialect (`aspect_ratio`, `resolution`, `input_references`) documented | Live submit + ref shape + error envelope (needs `OPENROUTER_API_KEY`) |

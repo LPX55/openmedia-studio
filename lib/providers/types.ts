@@ -165,6 +165,14 @@ export interface GenerationCapabilities {
   mediaUpload: boolean;
   /** Provider-level default staging (always overridable per binding / per operation). */
   mediaStaging: MediaStagingStrategy;
+  /**
+   * The provider can generate VIDEO.
+   *
+   * `false` ⇒ the video route refuses the request (an image-only backend would
+   * build a broken IMAGE request instead of failing fast); `undefined` ⇒
+   * unknown ⇒ allowed.
+   */
+  video?: boolean;
 }
 
 /**

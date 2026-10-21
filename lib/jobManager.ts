@@ -17,8 +17,9 @@
  *   (replaces the Phase-2 kieJobPoller shim). The Kie-Veo family is the one
  *   UNPOLLED family (C4 spike fallback — see the guard below).
  * - `resumeJob()`: crash recovery — restarts a lost poll loop via the
- *   registered provider, settles an orphaned in-process job ("Server
- *   restarted…"), leaves unknown providers untouched.
+ *   registered provider (kie, or a compat backend that implements `poll`),
+ *   settles an orphaned in-process job ("Server restarted…"), leaves unknown
+ *   providers untouched.
  */
 import { randomUUID } from "crypto";
 import { jobStore, type JobResult, type ProviderMeta } from "./jobStore";
@@ -459,6 +460,15 @@ export function resumeJob(taskId: string): void {
   const jobKind: JobKind = kind === "video" ? "video" : "image";
 
   if (providerId === "kie") {
+    appendJobLog(taskId, "resume", "restarting the poll loop for the recovered task");
+    startPolling(taskId, providerId, jobKind, meta);
+    return;
+  }
+  // A compat backend with a REGISTERED poll implementation (OpenRouter's
+  // video lane) — the upstream task survives a server restart exactly like
+  // kie's, so the poll loop is restarted through the same funnel.
+  const registered = getRegisteredProvider(providerId);
+  if (registered?.poll) {
     appendJobLog(taskId, "resume", "restarting the poll loop for the recovered task");
     startPolling(taskId, providerId, jobKind, meta);
     return;

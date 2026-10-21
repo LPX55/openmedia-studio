@@ -17,7 +17,8 @@ Status: draft. Supersedes design.md §5 Phase 6 and docs/provider-adapters-start
 One provider id, `openai-compat`, implemented once in `lib/providers/adapters/openaiCompat.ts`:
 
 - `submit`: `POST {baseUrl}/images/generations` (sync; `b64_json` → buffers or `url` → mirror), `POST {baseUrl}/images/edits` when reference media present (multipart-buffer staging). Responses normalize to `SubmitOutcome` sync form. Dialect overrides (OpenRouter `/images` path, `aspect_ratio`/`resolution`/`input_references` names) live in the binding's `paramMap` + `pathOverride`, not in code branches.
-- `poll`: undefined (sync-only family). Async compat backends are explicitly out of scope until the harness question reopens.
+- `submit` (VIDEO leg, added by the P6 video lane): `POST {baseUrl}/videos` → `202 {id, polling_url}`; the task is polled at `polling_url` and the finished BYTES are fetched from `…/content?index=0` (bearer) and handed to the settle funnel as raw buffers. The dialect (`duration` / `resolution` / `aspect_ratio` / `seed` / `generate_audio` / `frame_images` / `input_references`) lives in the binding's `paramMap` — the same "dialect is configuration" rule as the image leg.
+- `poll`: the VIDEO leg only (the image leg stays sync — no upstream task id). The status mapping is `pending|in_progress → pending`, `completed → done`, `failed|cancelled|expired → error`.
 - `checkReadiness`: key present (DB/env) + baseUrl configured. No deployment concept (that's Azure's).
 - `mediaStaging`: `data-url` default; per-binding override (multipart-buffer for edits endpoints that need it).
 - `provider_meta`: `{upstreamTaskId: null, family: "standard", statusUrl: null, responseUrl: null, upstreamModelId}`.

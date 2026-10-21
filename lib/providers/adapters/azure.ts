@@ -222,6 +222,15 @@ export const azureProvider: GenerationProvider = {
   label: "Azure Foundry",
   // Provider-level default; the gpt-image-2 binding refines per operation.
   mediaStaging: "data-url",
+  capabilities: {
+    syncSubmission: true,
+    polling: false,
+    mediaUpload: false,
+    mediaStaging: "data-url",
+    // IMAGE-ONLY backend — the video route refuses it (an Azure video request
+    // would be built as an image request).
+    video: false,
+  },
 
   checkReadiness(cfg: ProviderRuntimeConfig, binding?: ModelProviderBinding): { ready: boolean; reason?: string } {
     // Finding 1ii — at least as strict as the old `azureBaseUrl && azureDeployment` gate.

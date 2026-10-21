@@ -15,9 +15,14 @@
  *                         "remote-url" staging strategy — e.g. Pollinations'
  *                         media store)
  *
- * The family is SYNC-ONLY: one POST returns the finished image(s) — there is
- * no upstream task id, hence NO `poll()` (compat-plan §b). Async compat
- * backends stay out of scope until the harness question reopens.
+ * The family serves TWO upstream shapes:
+ *
+ *  - IMAGES (sync): one POST returns the finished image(s) — no upstream task
+ *    id, hence NO `poll()` for that leg (compat-plan §b).
+ *  - VIDEO (async): `POST {base}/videos` returns `202 {id, polling_url}` — the
+ *    task is polled at `polling_url` and the finished BYTES are fetched from
+ *    the result endpoint (`…/content?index=0`, bearer-authenticated) and handed
+ *    to the settle funnel as raw buffers (never base64).
  *
  * Reference media rides the SAME endpoint as plain generations
  * (`input_references`), so there is no `/images/edits` branch and no
@@ -32,11 +37,14 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MEDIA_DIR } from "../../guest/paths";
 import { appendJobLog, describeError, urlHost } from "../../jobLog";
+import type { ProviderMeta } from "../../jobStore";
 import type { CompatFieldSource, CompatParamMap, ModelProviderBinding } from "../bindings";
 import type {
   GenerateInput,
   GenerationProvider,
+  PollOutcome,
   ProviderRuntimeConfig,
+  StagedMedia,
   SubmitOutcome,
 } from "../types";
 
@@ -589,6 +597,456 @@ async function fetchWithRetry(
   }
 }
 
+// ── Video: the OpenRouter video dialect (contract verified 2026-10-21) ───────
+
+/**
+ * One frame image of a video request:
+ *   `{type:"image_url", image_url:{url}, frame_type:"first_frame"|"last_frame"}`
+ */
+interface CompatFrameImage {
+  type: "image_url";
+  image_url: { url: string };
+  frame_type: "first_frame" | "last_frame";
+}
+
+/**
+ * One input reference of a video request:
+ *   `{type:"image_url"|"video_url"|"audio_url", "<x>_url":{url}}`
+ */
+interface CompatInputReference {
+  type: "image_url" | "video_url" | "audio_url";
+  image_url?: { url: string };
+  video_url?: { url: string };
+  audio_url?: { url: string };
+}
+
+/** The staged URL of one media item (the passthrough URL, or the original). */
+function stagedUrlOf(media: StagedMedia | undefined): string | undefined {
+  return media?.url ?? media?.originalUrl;
+}
+
+/**
+ * The clip length to send: the catalog's (already clamped) duration, else the
+ * binding's own default, re-clamped to the model's upstream limits.
+ *
+ * A model without a duration picker (its clamped duration is 0) falls back to
+ * the binding's `defaultDuration`; a model whose caps are unknown sends no
+ * duration at all — an absent field is omitted, never 0.
+ */
+function resolveVideoDuration(
+  input: GenerateInput,
+  spec: CompatParamMap,
+): number | undefined {
+  const raw = input.params.duration;
+  let seconds =
+    typeof raw === "number" && raw > 0 ? Math.round(raw) : 0;
+  if (seconds === 0) {
+    seconds =
+      typeof spec.defaultDuration === "number" && spec.defaultDuration > 0
+        ? spec.defaultDuration
+        : 0;
+  }
+  if (seconds === 0) return undefined;
+  if (typeof spec.durationMin === "number" && seconds < spec.durationMin) {
+    seconds = spec.durationMin;
+  }
+  if (typeof spec.durationMax === "number" && seconds > spec.durationMax) {
+    seconds = spec.durationMax;
+  }
+  return seconds;
+}
+
+/**
+ * The frame images of a video request — the staged start/end frames.
+ *
+ * `spec.maxFrames` caps them (1 = the first frame only — the models whose
+ * caps list "first frame"), and `spec.referenceFrame` says that the staged
+ * REFERENCES ride as a frame instead of as an `input_references` entry (the
+ * models whose only image input is a first frame).
+ */
+function buildVideoFrames(
+  input: GenerateInput,
+  spec: CompatParamMap,
+): CompatFrameImage[] {
+  const frames: CompatFrameImage[] = [];
+  const max = spec.maxFrames ?? 2;
+  const media = input.media;
+
+  if (max >= 1) {
+    const start = stagedUrlOf(media.startFrame);
+    if (start) {
+      frames.push({ type: "image_url", image_url: { url: start }, frame_type: "first_frame" });
+    } else if (spec.referenceFrame === "first_frame") {
+      const reference = (media.references ?? []).map((r) => stagedUrlOf(r)).find(Boolean);
+      if (reference) {
+        frames.push({ type: "image_url", image_url: { url: reference }, frame_type: "first_frame" });
+      }
+    }
+  }
+
+  if (max >= 2) {
+    const end = stagedUrlOf(media.endFrame);
+    if (end) {
+      frames.push({ type: "image_url", image_url: { url: end }, frame_type: "last_frame" });
+    } else if (spec.referenceFrame === "last_frame") {
+      const reference = (media.references ?? []).map((r) => stagedUrlOf(r)).find(Boolean);
+      if (reference) {
+        frames.push({ type: "image_url", image_url: { url: reference }, frame_type: "last_frame" });
+      }
+    }
+  }
+
+  return frames;
+}
+
+/**
+ * The input references of a video request — the staged reference images, the
+ * reference videos and the reference audios, shaped by their media kind.
+ *
+ * `spec.maxReferences` caps the list (0 ⇒ the field is not declared at all —
+ * the models whose caps list frames only).
+ */
+function buildVideoInputReferences(
+  input: GenerateInput,
+  spec: CompatParamMap,
+): CompatInputReference[] {
+  const refs: CompatInputReference[] = [];
+  const media = input.media;
+
+  const push = (url: string | undefined, type: CompatInputReference["type"]) => {
+    if (!url) return;
+    refs.push({ type, [type]: { url } } as CompatInputReference);
+  };
+
+  // The references are already riding as a frame image — do not send them twice.
+  if (!spec.referenceFrame) {
+    for (const r of media.references ?? []) push(stagedUrlOf(r), "image_url");
+    for (const r of media.resources ?? []) push(stagedUrlOf(r.media), "image_url");
+  }
+  push(stagedUrlOf(media.videoRef), "video_url");
+  for (const v of media.referenceVideos ?? []) push(stagedUrlOf(v), "video_url");
+  for (const a of media.audioRefs ?? []) push(stagedUrlOf(a), "audio_url");
+
+  const cap = spec.maxReferences ?? 0;
+  return cap > 0 ? refs.slice(0, cap) : [];
+}
+
+/**
+ * Build the upstream VIDEO request body from the normalized params + the
+ * binding's dialect — the same "paramMap-driven" rule as the images leg.
+ *
+ * A field the dialect does not declare is NOT sent, and a field without a
+ * value is omitted (never null, never 0): the backend 400s on unexpected
+ * shapes. The "auto" aspect ratio is dropped even when the dialect forgot to
+ * map it — the router 400s on "auto" (verified live on the images lane).
+ */
+function buildVideoBody(
+  input: GenerateInput,
+  upstreamModelId: string,
+  spec: CompatParamMap,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  body[spec.modelKey ?? DEFAULT_MODEL_KEY] = upstreamModelId;
+
+  for (const [key, source] of Object.entries(spec.fields ?? {})) {
+    switch (source) {
+      case "prompt": {
+        if (input.prompt?.trim()) body[key] = input.prompt;
+        break;
+      }
+      case "duration": {
+        const duration = resolveVideoDuration(input, spec);
+        if (duration !== undefined) body[key] = duration;
+        break;
+      }
+      case "resolution": {
+        let value = applyValueMap(spec.valueMaps?.[key], input.params.resolution ?? "");
+        if (typeof value === "string" && value.trim().toLowerCase() === "auto") {
+          value = undefined; // "auto" is not in the upstream enum — drop it
+        }
+        if (value !== undefined && value !== "") body[key] = value;
+        break;
+      }
+      case "aspectRatio": {
+        let value = applyValueMap(spec.valueMaps?.[key], input.params.aspectRatio ?? "");
+        if (typeof value === "string" && value.trim().toLowerCase() === "auto") {
+          value = undefined; // "auto" is not in the upstream enum — drop it
+        }
+        if (value !== undefined && value !== "") body[key] = value;
+        break;
+      }
+      case "seed": {
+        if (typeof input.params.seed === "number") body[key] = input.params.seed;
+        break;
+      }
+      case "sound": {
+        body[key] = input.params.sound === true;
+        break;
+      }
+      case "frames": {
+        const frames = buildVideoFrames(input, spec);
+        if (frames.length > 0) body[key] = frames;
+        break;
+      }
+      case "inputReferences": {
+        const refs = buildVideoInputReferences(input, spec);
+        if (refs.length > 0) body[key] = refs;
+        break;
+      }
+      default:
+        // A source of the IMAGES dialect ("references", "tier", …) has no
+        // meaning in a video body — it is simply not sent.
+        break;
+    }
+  }
+
+  // The constants ride last — they pin a field the catalog has no picker for
+  // (e.g. the resolution of a model whose catalog entry only offers modes).
+  for (const [key, value] of Object.entries(spec.constants ?? {})) body[key] = value;
+
+  return body;
+}
+
+/**
+ * The absolute status URL of a submitted video task.
+ *
+ * The backend answers with a RELATIVE `polling_url` ("/api/v1/videos/…") ⇒ it
+ * is resolved against the ORIGIN of the backend's base URL (bearer auth, same
+ * host as the submit).
+ */
+function resolvePollingUrl(
+  pollingUrl: string | undefined,
+  baseUrl: string,
+  upstreamTaskId: string,
+): string {
+  if (pollingUrl && /^https?:\/\//i.test(pollingUrl)) return pollingUrl;
+  const path = pollingUrl ?? `/api/v1/videos/${encodeURIComponent(upstreamTaskId)}`;
+  try {
+    return new URL(path, new URL(baseUrl).origin).toString();
+  } catch {
+    return path;
+  }
+}
+
+/**
+ * The result endpoint of a finished task: the status URL + "/content"
+ * (`GET /api/v1/videos/{id}/content?index=0` → the raw video bytes).
+ */
+function contentUrlOf(statusUrl: string): string | null {
+  try {
+    const url = new URL(statusUrl);
+    url.pathname = `${url.pathname.replace(/\/+$/, "")}/content`;
+    url.search = "index=0";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** The string array of a JSON field (an empty array when it is absent). */
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+}
+
+/**
+ * The error message of an upstream error envelope: `{error:{code,message}}`
+ * (the contract's shape) — with a plain `message` as the fallback.
+ */
+function errorMessageOf(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const record = payload as { error?: unknown; message?: unknown };
+  const err = record.error;
+  if (typeof err === "string" && err.trim()) return err;
+  if (err && typeof err === "object") {
+    const detail = err as { message?: unknown; code?: unknown };
+    if (typeof detail.message === "string" && detail.message.trim()) return detail.message;
+    if (detail.code !== undefined) return `Upstream error ${String(detail.code)}`;
+  }
+  if (typeof record.message === "string" && record.message.trim()) return record.message;
+  return undefined;
+}
+
+/**
+ * Submit a VIDEO task: `POST {base}/videos` → `202 {id, polling_url, status}`.
+ *
+ * The response carries no media — the task is polled by `pollVideo()`.
+ */
+async function submitVideo(input: GenerateInput): Promise<SubmitOutcome> {
+  const cfg = input.credentials;
+  const binding = input.binding;
+
+  if (binding.presetError) throw new Error(binding.presetError);
+
+  const apiKey = resolveApiKey(cfg, binding);
+  if (!apiKey) {
+    throw new Error("No API key configured for this OpenAI-compatible backend. Add one in Settings.");
+  }
+  const baseUrl = resolveBaseUrl(cfg, binding);
+  if (!baseUrl) {
+    throw new Error("No base URL configured for this OpenAI-compatible backend. Add one in Settings.");
+  }
+
+  const url = `${baseUrl}${resolvePath(binding)}`;
+  const spec = (binding.paramMap ?? {}) as CompatParamMap;
+  const body = buildVideoBody(input, binding.upstreamModelId, spec);
+
+  // Shape only — never the body (the prompt is user content, the references
+  // are user media).
+  console.log("[openai-compat] video request →", {
+    host: urlHost(url) ?? "unknown",
+    model: binding.upstreamModelId,
+    fields: Object.keys(body).sort(),
+  });
+
+  const res = await fetchWithRetry(input.taskId, url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      throw new Error("Invalid API key for this OpenAI-compatible backend — please update it in Settings.");
+    }
+    let message = text.slice(0, 300);
+    try {
+      message = errorMessageOf(JSON.parse(text)) ?? message;
+    } catch { /* not JSON — keep the excerpt */ }
+    throw new Error(`Upstream error ${res.status}: ${message}`);
+  }
+
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`Upstream returned non-JSON: ${text.slice(0, 200)}`);
+  }
+
+  const record = (json ?? {}) as { id?: unknown; task_id?: unknown; polling_url?: unknown };
+  const id =
+    (typeof record.id === "string" && record.id) ||
+    (typeof record.task_id === "string" && record.task_id) ||
+    "";
+  if (!id) throw new Error("Upstream returned no video task id");
+
+  const statusUrl = resolvePollingUrl(
+    typeof record.polling_url === "string" ? record.polling_url : undefined,
+    baseUrl,
+    id,
+  );
+
+  appendJobLog(input.taskId, "submit", `video task accepted · id ${id} · status ${statusUrl}`);
+
+  const providerMeta: ProviderMeta = {
+    upstreamTaskId: id,
+    family: (binding.family as string | undefined) ?? "standard",
+    statusUrl,
+    upstreamModelId: binding.upstreamModelId,
+  };
+
+  return { mode: "async", upstreamTaskId: id, providerMeta };
+}
+
+/**
+ * One tick of the video poll loop.
+ *
+ * Status mapping (the contract's six):
+ *   pending / in_progress → pending
+ *   completed             → done
+ *   failed / cancelled / expired → error (the job's own error string)
+ *
+ * A finished task's BYTES live behind a bearer-authenticated endpoint
+ * (`…/content?index=0`), and the settle funnel's mirror sends no
+ * Authorization header ⇒ the bytes are fetched here and handed over as raw
+ * buffers (the "video buffers, not b64" path). When the fetch fails the tick
+ * stays `pending` and the next tick retries it.
+ */
+async function pollVideo(
+  upstreamTaskId: string,
+  kind: "image" | "video",
+  cfg: ProviderRuntimeConfig,
+  meta?: ProviderMeta,
+): Promise<PollOutcome> {
+  if (kind !== "video") {
+    return { state: "error", error: "openai-compat: polling is implemented for video tasks only." };
+  }
+  const apiKey = cfg.apiKey;
+  if (!apiKey) {
+    return { state: "error", error: "No API key configured for this OpenAI-compatible backend. Add one in Settings." };
+  }
+  const statusUrl = meta?.statusUrl ?? "";
+  if (!statusUrl) {
+    return { state: "error", error: "openai-compat: the video task carries no status URL." };
+  }
+
+  const res = await fetch(statusUrl, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let message = text.slice(0, 300);
+    try {
+      message = errorMessageOf(JSON.parse(text)) ?? message;
+    } catch { /* not JSON — keep the excerpt */ }
+    return { state: "error", error: `Upstream error ${res.status}: ${message}` };
+  }
+
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return { state: "error", error: `Upstream returned non-JSON: ${text.slice(0, 200)}` };
+  }
+  const record = (json ?? {}) as Record<string, unknown>;
+  const status = String(record.status ?? record.state ?? "").toLowerCase();
+
+  if (status === "completed") {
+    const contentUrl = contentUrlOf(statusUrl);
+    if (contentUrl) {
+      try {
+        const contentRes = await fetch(contentUrl, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+        if (contentRes.ok) {
+          const buffer = Buffer.from(await contentRes.arrayBuffer());
+          if (buffer.length > 0) {
+            const mimeType =
+              contentRes.headers.get("content-type")?.split(";")[0]?.trim() || "video/mp4";
+            return { state: "done", mediaUrls: [], buffers: [{ buffer, mimeType }] };
+          }
+        }
+      } catch {
+        // The content endpoint is not ready yet — the next tick retries it.
+      }
+    }
+    const unsigned = stringArray(record.unsigned_urls);
+    const signed = stringArray(record.urls);
+    if (unsigned.length === 0 && signed.length === 0) {
+      // Nothing to fetch and nothing to mirror — keep the task alive for the
+      // next tick instead of settling with an empty result.
+      return { state: "pending" };
+    }
+    return { state: "done", mediaUrls: unsigned.length ? unsigned : signed };
+  }
+
+  if (status === "failed" || status === "cancelled" || status === "expired") {
+    return {
+      state: "error",
+      error: errorMessageOf(record) ?? `Video generation ${status}`,
+    };
+  }
+
+  // pending / in_progress (and any status the backend adds later) → keep polling.
+  return { state: "pending" };
+}
+
 // ── Adapter ──────────────────────────────────────────────────────────────────
 
 export const openaiCompatProvider: GenerationProvider = {
@@ -611,13 +1069,18 @@ export const openaiCompatProvider: GenerationProvider = {
   // §c) — the registry resolves the preset layer into the binding's paramMap.
   usesParamPresets: true,
   capabilities: {
+    // The IMAGES leg is sync (one POST returns the media)…
     syncSubmission: true,
-    polling: false,
+    // …the VIDEO leg is async (202 + polling_url ⇒ the poll loop below).
+    polling: true,
     // The upload hook IS implemented (see `uploadMedia` below) — it is only
-    // REACHED by a binding that stages media as "remote-url" (Pollinations);
-    // the data-url backends never call it.
+    // REACHED by a binding that stages media as "remote-url" (Pollinations;
+    // OpenRouter's video lane — which documents NO upload endpoint, so a
+    // local file fails loudly there instead of being sent as a `data:` URI).
     mediaUpload: true,
     mediaStaging: "data-url",
+    // The family serves video too (the async `/videos` leg).
+    video: true,
   },
 
   /**
@@ -674,6 +1137,11 @@ export const openaiCompatProvider: GenerationProvider = {
   },
 
   async submit(input: GenerateInput): Promise<SubmitOutcome> {
+    // The VIDEO leg of the family (OpenRouter's `/videos`) is async: it
+    // answers `202 {id, polling_url}` and the result arrives through the poll
+    // loop. The IMAGES leg below is untouched.
+    if (input.kind === "video") return submitVideo(input);
+
     const cfg = input.credentials;
     const binding = input.binding;
 
@@ -765,5 +1233,20 @@ export const openaiCompatProvider: GenerationProvider = {
     );
 
     return { mode: "sync", mediaUrls, rawBuffers };
+  },
+
+  /**
+   * One tick of the family's ASYNC leg (the video dialect).
+   *
+   * The upstream task survives a server restart, so the job manager can
+   * restart the loop from the persisted `provider_meta` (`statusUrl`).
+   */
+  async poll(
+    upstreamTaskId: string,
+    kind: "image" | "video",
+    cfg: ProviderRuntimeConfig,
+    meta?: ProviderMeta,
+  ): Promise<PollOutcome> {
+    return pollVideo(upstreamTaskId, kind, cfg, meta);
   },
 };

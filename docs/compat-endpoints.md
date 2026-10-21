@@ -22,21 +22,28 @@ without a key (negative case). Record date + model used for each confirmation.
 
 | Model | Caps (from live listing) | Pricing | Status |
 |---|---|---|---|
-| `google/veo-3.1-lite` | 16:9/9:16, 720p/1080p, dur 8/4/6s, first+last frame, audio | per-second + resolution tiers — record at binding time | listed, NOT live-tested |
+| `google/veo-3.1-lite` | 16:9/9:16, 720p/1080p, dur 8/4/6s, first+last frame, audio | per-second + resolution tiers — record at binding time | binding in place, NOT live-tested |
 | `google/veo-3.1` (implied family) | via catalog `veo3` entry | — | catalog-only, needs binding |
-| `x-ai/grok-imagine-video-1.5` + `-lite` | 16:9/9:16/1:1/4:3/3:2, 480p/720p/1080p, dur 1–15s, first frame | per-second tiers — record at binding time | listed, NOT live-tested |
-| `kling-3.0-std` / `kling-3.0-pro` | 720p, dur 3–15s, first+last frame, audio | per-second — record at binding time | listed, NOT live-tested |
-| `bytedance/seedance-2.0-fast` / `-mini` | 480p/720p, dur 4–15s, first+last frame | token-metered — record at binding time | listed, NOT live-tested |
-| `minimax/hailuo-3` / `-max` | 480p/768p (`-max`), dur 5–15s, first+last frame | per-second tiers — record at binding time | listed, NOT live-tested |
-| `alibaba/wan-2.6` | 16:9/9:16, 720p/1082p-class, dur 5/10s, first frame | per-second tiers — record at binding time | listed, NOT live-tested |
-| `black-forest-labs/flux-video-edit` / `-upscale` | edit/upscale variants, caps vary | per-second — record at binding time | listed, NOT live-tested |
+| `x-ai/grok-imagine-video-1.5` + `-lite` | 16:9/9:16/1:1/4:3/3:2, 480p/720p/1080p, dur 1–15s, first frame | per-second tiers — record at binding time | binding in place, NOT live-tested |
+| `kling-3.0-std` / `kling-3.0-pro` | 720p, dur 3–15s, first+last frame, audio | per-second — record at binding time | binding in place, NOT live-tested |
+| `bytedance/seedance-2.0-fast` / `-mini` | 480p/720p, dur 4–15s, first+last frame | token-metered — record at binding time | binding in place, NOT live-tested |
+| `minimax/hailuo-3` / `-max` | 480p/768p (`-max`), dur 5–15s, first+last frame | per-second tiers — record at binding time | binding in place, NOT live-tested |
+| `alibaba/wan-2.6` | 16:9/9:16, 720p/1082p-class, dur 5/10s, first frame | per-second tiers — record at binding time | binding in place, NOT live-tested |
+| `black-forest-labs/flux-video-edit` / `-upscale` | edit/upscale variants, caps vary | per-second — record at binding time | binding in place, NOT live-tested |
 
-> Pricing rule going forward: capture per-model pricing at binding time from the live listing (`pricing_skus`) into the binding comment + this table. The video submit path does not exist yet (adapter is images-only; `/api/generate-video` is kie-only) — bindings are blocked on it, NOT on data.
+> Pricing rule going forward: capture per-model pricing at binding time from the live listing (`pricing_skus`) into the binding comment + this table.
+>
+> **Video submit path (P6 video lane, 2026-10-21):** the openai-compat family
+> now serves the video dialect too — `POST {base}/v1/videos` (202 + `polling_url`),
+> the poll at `polling_url`, the bytes at `…/content?index=0` (bearer). The 12
+> OpenRouter video bindings are code-defined (`lib/providers/bindings.ts`); the
+> caps above are enforced per binding (duration re-clamp, tier drop). Pricing is
+> still UNCAPTURED ⇒ the cost of a live test is UNVERIFIED.
 
 | Backend | Base URL | Basis | Gap to confirmed |
 |---|---|---|---|
 | OpenRouter images | `https://openrouter.ai/api` | Spike: 10/11 catalog models map to live `/api/v1/images/models` ids; dialect (`aspect_ratio`, `resolution`, `input_references`) documented | Live submit + ref shape + error envelope (needs `OPENROUTER_API_KEY`) |
-| OpenRouter video | `https://openrouter.ai/api` | Spike: `/api/v1/videos/models` live, 13/17 catalog rows with schemas | Same as images, plus duration/clamp behavior |
+| OpenRouter video | `https://openrouter.ai/api` | Spike: `/api/v1/videos/models` live, 13/17 catalog rows with schemas | Submit path IMPLEMENTED (P6 video lane) — live submit + the reference shape + the error envelope still unverified (needs `OPENROUTER_API_KEY`) |
 | Pollinations video | `https://gen.pollinations.ai` | Spike: models listed, caps tighter (refs ≤2, several 5s-capped) | Weak lane — live submit + duration/clamp confirmation; async path explicitly NOT covered |
 | LiteLLM-routed (self-hosted gateway) | user-run | Docs: `/v1/images/generations`, `/v1/images/edits`, OpenAI Video API spec across providers | No live test; first-party-lab coverage only; reference-image support beyond Sora unverified |
 | Together | `https://api.together.xyz` | Docs: OpenAI-compatible images + video API | No live test; narrower than the spike set |

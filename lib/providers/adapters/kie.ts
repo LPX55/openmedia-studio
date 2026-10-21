@@ -573,6 +573,13 @@ export const kieProvider: GenerationProvider = {
   id: "kie",
   label: "Kie.ai",
   mediaStaging: "remote-url",
+  capabilities: {
+    syncSubmission: false,   // kie is a QUEUE backend — the poll loop owns it
+    polling: true,
+    mediaUpload: true,
+    mediaStaging: "remote-url",
+    video: true,
+  },
 
   /** kieUpload.ts delegation — pushes local `/generated/…`/`data:` to kie's temp store. */
   async uploadMedia(localPathOrDataUrl: string, _mimeType: string, cfg: ProviderRuntimeConfig): Promise<string> {

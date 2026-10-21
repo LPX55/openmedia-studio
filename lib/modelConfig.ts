@@ -1201,4 +1201,83 @@ export const VIDEO_MODELS: VideoModel[] = [
       extra: { background_source: "input_video" }, // background_source not user-selectable yet — default to video background
     },
   },
+  // ── Alibaba Wan (OpenRouter video lane, sweep 2026-10-21) ──────────────────
+  {
+    // Sweep 2026-10-21: OpenRouter `alibaba/wan-2.6` — caps from the live
+    // listing (16:9/9:16, 720p/1080p-class, durations 5/10 s, FIRST frame).
+    // Kie apiId is a family-convention guess (UNVERIFIED) — OR is the intended
+    // path; a kie selection may 404 loudly until confirmed.
+    id: "wan-2.6",
+    apiId: "alibaba/wan-2.6",
+    name: "Wan 2.6",
+    provider: "Alibaba",
+    ratios: ["16:9", "9:16"],
+    durations: [5, 10],
+    defaultDuration: 5,
+    defaultRatio: "16:9",
+    handles: ["prompt", "startFrame"],
+    sound: false,
+    resolutions: ["720p", "1080p"],
+    defaultResolution: "720p",
+    apiInput: {
+      aspectRatioKey: "aspect_ratio",
+      durationKey: "duration",
+      durationMin: 5,
+      durationMax: 10,
+      resolutionKey: "resolution",
+      firstFrameKey: "first_frame_url",
+      promptMaxLength: 5000,
+    },
+  },
+  // ── Flux video (OpenRouter video lane, sweep 2026-10-21) ───────────────────
+  {
+    // Sweep 2026-10-21: OpenRouter `black-forest-labs/flux-video-edit` — the
+    // upstream caps VARY per variant, so only the prompt and the source video
+    // are sent (no duration / resolution / aspect ratio — an unknown field is
+    // a 400). Kie apiId is a family-convention guess (UNVERIFIED).
+    id: "flux-video-edit",
+    apiId: "black-forest-labs/flux-video-edit",
+    name: "Flux Video Edit",
+    provider: "Flux",
+    ratios: [],    // caps vary upstream — no ratio picker
+    durations: [], // caps vary upstream — no duration picker
+    defaultDuration: 0,
+    defaultRatio: "16:9",
+    handles: ["prompt", "resource", "videoRef"],
+    sound: false,
+    promptOptional: true,
+    maxResources: 1,
+    maxReferenceVideos: 1,
+    apiInput: {
+      aspectRatioKey: "aspect_ratio",
+      durationKey: "duration",
+      durationMin: 0,
+      durationMax: 0,
+      promptMaxLength: 4000,
+    },
+  },
+  {
+    // Sweep 2026-10-21: OpenRouter `black-forest-labs/flux-video-upscale` —
+    // same caveats as the edit variant (the caps vary upstream). The source
+    // video is the input; the prompt is optional.
+    id: "flux-video-upscale",
+    apiId: "black-forest-labs/flux-video-upscale",
+    name: "Flux Video Upscale",
+    provider: "Flux",
+    ratios: [],    // caps vary upstream — no ratio picker
+    durations: [], // caps vary upstream — no duration picker
+    defaultDuration: 0,
+    defaultRatio: "16:9",
+    handles: ["prompt", "videoRef"],
+    sound: false,
+    promptOptional: true,
+    maxReferenceVideos: 1,
+    apiInput: {
+      aspectRatioKey: "aspect_ratio",
+      durationKey: "duration",
+      durationMin: 0,
+      durationMax: 0,
+      promptMaxLength: 4000,
+    },
+  },
 ];

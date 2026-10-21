@@ -6,6 +6,13 @@
  * submitJob → `{ taskId }`. The 9-family Kie payload builders (incl. the Veo
  * endpoint switch) moved verbatim into `lib/providers/adapters/kie.ts`; the
  * client no longer sends alternate veo bodies (design §4.1).
+ *
+ * PROVIDER RESOLUTION (P6 video lane): the backend comes from
+ * `resolveForModel` — the explicit `providerId`, else the model's active
+ * `model_bindings` row, else the static default (kie). The kie path is
+ * UNCHANGED (same payload, same staging, same submit); the compat family
+ * (OpenRouter's `/videos`) rides the SAME controller — the adapter owns the
+ * dialect, the route stays provider-agnostic.
  */
 import { NextRequest, NextResponse } from "next/server";
 // `@/lib/providers/bootstrap` (NOT `@/lib/providers` — the client-side
@@ -73,6 +80,15 @@ export async function POST(req: NextRequest) {
     }
 
     const { provider, binding, config } = resolveForModel(videoModel, providerId, guestDb.getModelBindingRows(videoModel));
+
+    // An image-only backend (azure / codex) cannot serve a video request — it
+    // would build an IMAGE payload and fail upstream with a confusing error.
+    if (provider.capabilities?.video === false) {
+      return NextResponse.json(
+        { error: `${provider.label} does not support video generation.` },
+        { status: 400 },
+      );
+    }
 
     const readiness = provider.checkReadiness(config, binding);
     if (!readiness.ready) {

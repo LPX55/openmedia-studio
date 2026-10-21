@@ -156,6 +156,14 @@ export const codexProvider: GenerationProvider = {
   id: "codex",
   label: "Codex CLI",
   mediaStaging: "local-file",
+  capabilities: {
+    syncSubmission: true,
+    polling: false,
+    mediaUpload: false,
+    mediaStaging: "local-file",
+    // IMAGE-ONLY backend (the codex-imagegen CLI) — the video route refuses it.
+    video: false,
+  },
 
   checkReadiness(cfg): { ready: boolean; reason?: string } {
     // Finding 1iii — keySource "cli" branch; the api_key chain does not apply.

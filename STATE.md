@@ -1,11 +1,44 @@
 # STATE
 status: done        # active | paused | blocked | done
-focus: Qwen Turbo proven live t2i + i2v (incl auto-ratio fix 9a15a1f) on feat/pluggable-providers; dev server running; ready: workflow automations / next scope
-next: user call — move on to automations (recommended), video leg, or merge
+focus: P6 video lane (OpenRouter video through the openai-compat family) landed in the WORKING TREE on feat/pluggable-providers — submit/poll/route wired, offline smoke green; NOT live-tested
+next: user call — approve the live video test (spend) or continue with the next scope (automations / merge)
 blockers: none
 updated: 2026-10-21
 
 ## Notes
+
+- 2026-10-21 — P6 VIDEO lane (provider-refactor-impl) landed in the WORKING TREE
+  (uncommitted, no commits per the task) on `feat/pluggable-providers`: the
+  openai-compat family grew an ASYNC video leg beside its sync image leg —
+  `POST {base}/videos` → `202 {id, polling_url}` (the relative polling_url is
+  resolved against the backend ORIGIN), the poll maps the contract's six
+  statuses (pending|in_progress → pending, completed → done, failed|cancelled|
+  expired → error with the job's own error string) and a finished task's BYTES
+  are fetched from the bearer-authenticated `…/content?index=0` and handed to
+  the settle funnel as raw BUFFERS (the "video buffers, not b64" path — the
+  funnel's mirror sends no Authorization header, so the bytes must be fetched
+  provider-side). 12 OpenRouter video bindings (google/veo-3.1-lite,
+  x-ai/grok-imagine-video-1.5 + -lite, kwaiv/kling-3.0-pro + -std,
+  bytedance/seedance-2.0-fast + -mini, minimax/hailuo-3 + -max,
+  alibaba/wan-2.6, black-forest-labs/flux-video-edit + -upscale) ride the
+  existing 6 catalog rows untouched; 3 catalog rows were ADDED (wan-2.6,
+  flux-video-edit, flux-video-upscale) with the sweep's caps. The dialect is
+  binding data (`fields` + new sources duration/sound/frames/inputReferences,
+  `maxFrames`, `maxReferences`, `durationMin/Max`, `defaultDuration`,
+  `referenceFrame`, `constants`): the duration is re-clamped to the model's own
+  limits (minimax 4 → 5), unsupported tiers are DROPPED (the "auto" ratio —
+  the router 400s on it — and 4k/2K/1080p), Kling's resolution is pinned to
+  720p, and a model with no duration picker sends the binding's own default.
+  The video lane stages media as "remote-url" (OpenRouter takes HTTPS URLs
+  only and documents NO upload endpoint ⇒ a local file fails LOUDLY). The
+  jobManager's resumeJob now restarts the poll loop for any registered
+  provider with a poll implementation (kie is unchanged) and the video route
+  refuses an image-only backend. Validated: tsc exit 0, eslint zero-new-vs-HEAD
+  (git-stash compare, 0 = 0), the offline smoke fixture green at 432
+  assertions (new video section: body shape, clamp/drop/default, async submit,
+  all six poll statuses, the content download, and a route-level end-to-end —
+  stubbed fetch ONLY, zero network). NOT live-tested: the registry's pricing
+  column is still uncaptured ⇒ the cost of a live run is UNVERIFIED.
 
 - 2026-10-21 — Job trail + run-log viewer landed in the WORKING TREE (uncommitted, no
   commits per the task) on `feat/pluggable-providers`: `lib/jobLog.ts` appends a

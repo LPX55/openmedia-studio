@@ -51,6 +51,14 @@ export type VideoPayloadFamily =
  *  - "seed"         — the seed
  *  - "references"   — the staged reference images
  *  - "outputFormat" — the catalog's declared output format
+ *
+ * VIDEO sources (the OpenRouter video dialect — `POST /v1/videos`):
+ *
+ *  - "duration"        — the clip length in SECONDS (an int)
+ *  - "sound"           — the audio toggle (a bool → `generate_audio`)
+ *  - "frames"          — the staged start/end frames → `frame_images`
+ *  - "inputReferences" — the staged references / videos / audios →
+ *                        `input_references`
  */
 export type CompatFieldSource =
   | "prompt"
@@ -63,7 +71,11 @@ export type CompatFieldSource =
   | "height"
   | "seed"
   | "references"
-  | "outputFormat";
+  | "outputFormat"
+  | "duration"
+  | "sound"
+  | "frames"
+  | "inputReferences";
 
 /**
  * The DIALECT of an openai-compat binding — the shape of its `paramMap`.
@@ -92,10 +104,33 @@ export type CompatFieldSource =
 export type CompatParamMap = {
   fields?: Record<string, CompatFieldSource>;
   valueMaps?: Record<string, Record<string, string | null>>;
-  constants?: Record<string, string>;
+  constants?: Record<string, string | number>;
   modelKey?: string;
   maxReferences?: number;
   referenceMode?: "array" | "first" | "objects";
+  /**
+   * VIDEO — the upstream FRAME cap: `1` = the first frame only, `2` = first +
+   * last. Undefined ⇒ both frames ride when they exist.
+   */
+  maxFrames?: number;
+  /**
+   * VIDEO — the upstream duration clamp. It RE-clamps the catalog's picker to
+   * the model's own limits (the spike's "must re-clamp to 1–15" rule): a value
+   * outside the range is pulled to the nearest bound, never sent as-is.
+   */
+  durationMin?: number;
+  durationMax?: number;
+  /**
+   * VIDEO — the duration sent when the catalog has NO duration picker (its
+   * clamped duration is 0). The model's own default clip length.
+   */
+  defaultDuration?: number;
+  /**
+   * VIDEO — when set, the staged REFERENCES ride as a FRAME image with this
+   * `frame_type` instead of as an `input_references` entry — the shape of a
+   * backend whose only image input is a first frame.
+   */
+  referenceFrame?: "first_frame" | "last_frame";
 };
 
 /**
@@ -748,6 +783,422 @@ const openRouterImageBindings: ModelProviderBinding[] = [
   },
 ];
 
+// ── OpenRouter VIDEO dialect (compat-plan §b; sweep 2026-10-21) ──────────────
+
+/**
+ * OpenRouter's VIDEO endpoint path — `POST {base}/videos`, i.e.
+ * `https://openrouter.ai/api/v1/videos` (the same absolute URL the images
+ * lane reaches through `OPENROUTER_BASE_URL` + `/images`).
+ */
+export const OPENROUTER_VIDEO_PATH = "/videos";
+
+/**
+ * The dialect fields the OpenRouter VIDEO endpoint takes (contract verified
+ * 2026-10-21):
+ *
+ *   model            — the upstream model id
+ *   prompt           — the prompt text (optional)
+ *   duration         — the clip length in SECONDS (an int)
+ *   resolution       — the resolution tier ("720p", "768p", …)
+ *   aspect_ratio     — the aspect ratio (optional; "auto" is NOT in the
+ *                      upstream enum — the router 400s on it, so it is dropped)
+ *   seed             — the seed (optional, numeric)
+ *   generate_audio   — the audio flag (bool)
+ *   frame_images     — [{type:"image_url", image_url:{url}, frame_type:
+ *                      "first_frame"|"last_frame"}]
+ *   input_references — [{type:"image_url"|"audio_url"|"video_url",
+ *                      "<x>_url":{url}}]
+ *
+ * A field the binding does NOT declare is never sent (the backend 400s on
+ * unexpected shapes) and a field without a value is omitted — never null.
+ */
+const OR_VIDEO_FIELDS = {
+  prompt: "prompt",
+  duration: "duration",
+  resolution: "resolution",
+  aspect_ratio: "aspectRatio",
+  seed: "seed",
+  generate_audio: "sound",
+  frame_images: "frames",
+  input_references: "inputReferences",
+} as const;
+
+/**
+ * The OpenRouter video bindings — the swept upstream ids of
+ * `docs/compat-endpoints.md` (video table, 2026-10-21).
+ *
+ * Two rules shape every binding:
+ *
+ *  - REFERENCES ARE HTTPS-URLS ONLY. The video endpoint takes no `data:` URI
+ *    and OpenRouter documents NO upload endpoint ⇒ the binding stages media as
+ *    "remote-url": an already-public URL passes through, a LOCAL file has to be
+ *    uploaded first (the family's `uploadMedia` hook fails LOUDLY — a silently
+ *    dropped reference is worse than a surfaced error).
+ *  - THE CATALOG ENTRY IS THE SOURCE OF THE CAPS. The binding re-clamps the
+ *    duration to the model's own limits and drops the tiers the upstream enum
+ *    rejects (the "auto" ratio / an unsupported resolution) instead of sending
+ *    a value the router would 400 on.
+ *
+ * The upstream ids come from the live listing (2026-10-21); the per-model caps
+ * from `docs/compat-endpoints.md` + the binding-availability spike. Pricing is
+ * NOT captured yet (the registry's pricing column still says "record at
+ * binding time") — the cost of a live test is UNVERIFIED.
+ */
+const openRouterVideoBindings: ModelProviderBinding[] = [
+  // google/veo-3.1-lite → catalog `veo3_lite`. Caps: 16:9/9:16, 720p/1080p
+  // (NO 4k — the catalog offers one), durations 4/6/8, first + last frame,
+  // audio. The catalog entry has NO duration picker (the Kie Veo payload sends
+  // no duration), so the binding carries its own default (6 s — the middle of
+  // the model's own 4/6/8) and clamps to [4, 8].
+  {
+    modelId: "veo3_lite",
+    providerId: "openrouter",
+    upstreamModelId: "google/veo-3.1-lite",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_VIDEO_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    mediaStaging: "remote-url",
+    paramMap: {
+      fields: {
+        prompt: OR_VIDEO_FIELDS.prompt,
+        duration: OR_VIDEO_FIELDS.duration,
+        resolution: OR_VIDEO_FIELDS.resolution,
+        aspect_ratio: OR_VIDEO_FIELDS.aspect_ratio,
+        generate_audio: OR_VIDEO_FIELDS.generate_audio,
+        frame_images: OR_VIDEO_FIELDS.frame_images,
+      },
+      valueMaps: {
+        // "4k" is not in the upstream enum (720p/1080p only) — drop it and let
+        // the server default apply (the images lane's verified auto-drop).
+        resolution: { "4k": null },
+        // "auto" is not in the upstream enum — the router 400s on it.
+        aspect_ratio: { auto: null },
+      },
+      maxFrames: 2,
+      durationMin: 4,
+      durationMax: 8,
+      defaultDuration: 6,
+    },
+  },
+
+  // x-ai/grok-imagine-video-1.5 → catalog `grok-imagine-1-5-preview`. Caps:
+  // 16:9/9:16/1:1/4:3/3:2, 480p/720p/1080p, durations 1–15, FIRST frame only.
+  // The catalog's only image handle is "resource" (it is even REQUIRED) ⇒ the
+  // staged reference rides as the first FRAME (`referenceFrame`), not as an
+  // `input_references` entry.
+  {
+    modelId: "grok-imagine-1-5-preview",
+    providerId: "openrouter",
+    upstreamModelId: "x-ai/grok-imagine-video-1.5",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_VIDEO_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    mediaStaging: "remote-url",
+    paramMap: {
+      fields: {
+        prompt: OR_VIDEO_FIELDS.prompt,
+        duration: OR_VIDEO_FIELDS.duration,
+        resolution: OR_VIDEO_FIELDS.resolution,
+        aspect_ratio: OR_VIDEO_FIELDS.aspect_ratio,
+        frame_images: OR_VIDEO_FIELDS.frame_images,
+      },
+      valueMaps: {
+        // The catalog offers "auto", "3:4" and "2:3" — none of them are in the
+        // upstream enum ⇒ dropped (the server default applies).
+        aspect_ratio: { auto: null, "3:4": null, "2:3": null },
+      },
+      maxFrames: 1,
+      referenceFrame: "first_frame",
+      durationMin: 1,
+      durationMax: 15,
+    },
+  },
+
+  // x-ai/grok-imagine-video-1.5-lite → the same catalog entry (the lite
+  // variant of the same model — same caps). A SECOND static binding so the id
+  // is pinned; the default binding resolution picks the entry above.
+  {
+    modelId: "grok-imagine-1-5-preview",
+    providerId: "openrouter",
+    upstreamModelId: "x-ai/grok-imagine-video-1.5-lite",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_VIDEO_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    mediaStaging: "remote-url",
+    paramMap: {
+      fields: {
+        prompt: OR_VIDEO_FIELDS.prompt,
+        duration: OR_VIDEO_FIELDS.duration,
+        resolution: OR_VIDEO_FIELDS.resolution,
+        aspect_ratio: OR_VIDEO_FIELDS.aspect_ratio,
+        frame_images: OR_VIDEO_FIELDS.frame_images,
+      },
+      valueMaps: {
+        aspect_ratio: { auto: null, "3:4": null, "2:3": null },
+      },
+      maxFrames: 1,
+      referenceFrame: "first_frame",
+      durationMin: 1,
+      durationMax: 15,
+    },
+  },
+
+  // kwaiv/kling-3.0-pro → catalog `kling-3.0`. Caps: 720p only, durations
+  // 3–15, first + last frame, audio. The catalog models the quality as a
+  // MODE (std/pro/4K) and offers no resolution tier ⇒ the binding pins the
+  // resolution as a constant (720p — the only tier upstream has). The "pro"
+  // variant is the default binding (the catalog's default mode is "pro").
+  {
+    modelId: "kling-3.0",
+    providerId: "openrouter",
+    upstreamModelId: "kwaiv/kling-3.0-pro",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_VIDEO_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    mediaStaging: "remote-url",
+    paramMap: {
+      fields: {
+        prompt: OR_VIDEO_FIELDS.prompt,
+        duration: OR_VIDEO_FIELDS.duration,
+        aspect_ratio: OR_VIDEO_FIELDS.aspect_ratio,
+        generate_audio: OR_VIDEO_FIELDS.generate_audio,
+        frame_images: OR_VIDEO_FIELDS.frame_images,
+      },
+      constants: { resolution: "720p" },
+      maxFrames: 2,
+      durationMin: 3,
+      durationMax: 15,
+    },
+  },
+
+  // kwaiv/kling-3.0-std → the same catalog entry (the standard variant of
+  // the same model — same caps). A SECOND static binding so the id is pinned.
+  {
+    modelId: "kling-3.0",
+    providerId: "openrouter",
+    upstreamModelId: "kwaiv/kling-3.0-std",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_VIDEO_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    mediaStaging: "remote-url",
+    paramMap: {
+      fields: {
+        prompt: OR_VIDEO_FIELDS.prompt,
+        duration: OR_VIDEO_FIELDS.duration,
+        aspect_ratio: OR_VIDEO_FIELDS.aspect_ratio,
+        generate_audio: OR_VIDEO_FIELDS.generate_audio,
+        frame_images: OR_VIDEO_FIELDS.frame_images,
+      },
+      constants: { resolution: "720p" },
+      maxFrames: 2,
+      durationMin: 3,
+      durationMax: 15,
+    },
+  },
+
+  // bytedance/seedance-2.0-fast → catalog `seedance-2-fast`. Caps: 480p/720p
+  // (the catalog also offers 1080p — dropped), durations 4–15, first + last
+  // frame. The upstream reference cap is UNVERIFIED ⇒ the conservative cap of
+  // the compat video lane (2) applies.
+  {
+    modelId: "seedance-2-fast",
+    providerId: "openrouter",
+    upstreamModelId: "bytedance/seedance-2.0-fast",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_VIDEO_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    mediaStaging: "remote-url",
+    paramMap: {
+      fields: {
+        prompt: OR_VIDEO_FIELDS.prompt,
+        duration: OR_VIDEO_FIELDS.duration,
+        resolution: OR_VIDEO_FIELDS.resolution,
+        aspect_ratio: OR_VIDEO_FIELDS.aspect_ratio,
+        frame_images: OR_VIDEO_FIELDS.frame_images,
+        input_references: OR_VIDEO_FIELDS.input_references,
+      },
+      valueMaps: {
+        resolution: { "1080p": null },
+        // "adaptive" is a Kie-ism — the upstream enum has no such ratio.
+        aspect_ratio: { adaptive: null },
+      },
+      maxFrames: 2,
+      maxReferences: 2,
+      durationMin: 4,
+      durationMax: 15,
+    },
+  },
+
+  // bytedance/seedance-2.0-mini → catalog `seedance-2-mini`. Caps: 480p/720p,
+  // durations 4–15, first + last frame, seed ✓ (the only swept model whose
+  // endpoint record carries a seed).
+  {
+    modelId: "seedance-2-mini",
+    providerId: "openrouter",
+    upstreamModelId: "bytedance/seedance-2.0-mini",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_VIDEO_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    mediaStaging: "remote-url",
+    paramMap: {
+      fields: {
+        prompt: OR_VIDEO_FIELDS.prompt,
+        duration: OR_VIDEO_FIELDS.duration,
+        resolution: OR_VIDEO_FIELDS.resolution,
+        aspect_ratio: OR_VIDEO_FIELDS.aspect_ratio,
+        seed: OR_VIDEO_FIELDS.seed,
+        frame_images: OR_VIDEO_FIELDS.frame_images,
+        input_references: OR_VIDEO_FIELDS.input_references,
+      },
+      valueMaps: {
+        aspect_ratio: { adaptive: null },
+      },
+      maxFrames: 2,
+      maxReferences: 2,
+      durationMin: 4,
+      durationMax: 15,
+    },
+  },
+
+  // minimax/hailuo-3 → catalog `minimax-h3` (upstream uses "hailuo", not
+  // "minimax-h3/*" — a naming drift, see the spike). Caps: 480p/768p, durations
+  // 5–15 (the catalog offers 4–15 ⇒ re-clamped), first + last frame. The
+  // catalog's resolution strings ("768P"/"2K") do NOT match the upstream enum
+  // ⇒ "768P" maps to "768p", "2K" is dropped.
+  {
+    modelId: "minimax-h3",
+    providerId: "openrouter",
+    upstreamModelId: "minimax/hailuo-3",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_VIDEO_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    mediaStaging: "remote-url",
+    paramMap: {
+      fields: {
+        prompt: OR_VIDEO_FIELDS.prompt,
+        duration: OR_VIDEO_FIELDS.duration,
+        resolution: OR_VIDEO_FIELDS.resolution,
+        aspect_ratio: OR_VIDEO_FIELDS.aspect_ratio,
+        frame_images: OR_VIDEO_FIELDS.frame_images,
+        input_references: OR_VIDEO_FIELDS.input_references,
+      },
+      valueMaps: {
+        resolution: { "768P": "768p", "2K": null },
+      },
+      maxFrames: 2,
+      maxReferences: 2,
+      durationMin: 5,
+      durationMax: 15,
+    },
+  },
+
+  // minimax/hailuo-3-max → the same catalog entry (the max variant of the
+  // same model — same caps). A SECOND static binding so the id is pinned.
+  {
+    modelId: "minimax-h3",
+    providerId: "openrouter",
+    upstreamModelId: "minimax/hailuo-3-max",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_VIDEO_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    mediaStaging: "remote-url",
+    paramMap: {
+      fields: {
+        prompt: OR_VIDEO_FIELDS.prompt,
+        duration: OR_VIDEO_FIELDS.duration,
+        resolution: OR_VIDEO_FIELDS.resolution,
+        aspect_ratio: OR_VIDEO_FIELDS.aspect_ratio,
+        frame_images: OR_VIDEO_FIELDS.frame_images,
+        input_references: OR_VIDEO_FIELDS.input_references,
+      },
+      valueMaps: {
+        resolution: { "768P": "768p", "2K": null },
+      },
+      maxFrames: 2,
+      maxReferences: 2,
+      durationMin: 5,
+      durationMax: 15,
+    },
+  },
+
+  // alibaba/wan-2.6 → catalog `wan-2.6` (added by this sweep). Caps: 16:9/9:16,
+  // 720p/1080p-class, durations 5/10, FIRST frame only.
+  {
+    modelId: "wan-2.6",
+    providerId: "openrouter",
+    upstreamModelId: "alibaba/wan-2.6",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_VIDEO_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    mediaStaging: "remote-url",
+    paramMap: {
+      fields: {
+        prompt: OR_VIDEO_FIELDS.prompt,
+        duration: OR_VIDEO_FIELDS.duration,
+        resolution: OR_VIDEO_FIELDS.resolution,
+        aspect_ratio: OR_VIDEO_FIELDS.aspect_ratio,
+        frame_images: OR_VIDEO_FIELDS.frame_images,
+      },
+      maxFrames: 1,
+      durationMin: 5,
+      durationMax: 10,
+    },
+  },
+
+  // black-forest-labs/flux-video-edit → catalog `flux-video-edit` (added by
+  // this sweep). The caps VARY upstream ("edit/upscale variants, caps vary")
+  // ⇒ only the prompt and the source VIDEO are sent — no duration, no
+  // resolution, no aspect ratio (an unknown field is a 400).
+  {
+    modelId: "flux-video-edit",
+    providerId: "openrouter",
+    upstreamModelId: "black-forest-labs/flux-video-edit",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_VIDEO_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    mediaStaging: "remote-url",
+    paramMap: {
+      fields: {
+        prompt: OR_VIDEO_FIELDS.prompt,
+        input_references: OR_VIDEO_FIELDS.input_references,
+      },
+      maxReferences: 1,
+    },
+  },
+
+  // black-forest-labs/flux-video-upscale → catalog `flux-video-upscale` (added
+  // by this sweep). Same caps as the edit variant: the source video rides as
+  // an `input_references` entry, nothing else is sent.
+  {
+    modelId: "flux-video-upscale",
+    providerId: "openrouter",
+    upstreamModelId: "black-forest-labs/flux-video-upscale",
+    family: "standard",
+    baseUrl: OPENROUTER_BASE_URL,
+    pathOverride: OPENROUTER_VIDEO_PATH,
+    keyEnv: OPENROUTER_KEY_ENV,
+    mediaStaging: "remote-url",
+    paramMap: {
+      fields: {
+        prompt: OR_VIDEO_FIELDS.prompt,
+        input_references: OR_VIDEO_FIELDS.input_references,
+      },
+      maxReferences: 1,
+    },
+  },
+];
+
 // ── Pollinations image dialect (compat-plan §b; spike: .slim/binding-spike.md) ──
 
 /** Pollinations' generation base URL (spike, 2026-10-20). */
@@ -917,8 +1368,8 @@ const pollinationsImageBindings: ModelProviderBinding[] = [
 /**
  * C1 static binding set: 11 image models + 17 video models, each with a Kie
  * binding (`upstreamModelId = apiId`), plus Azure and Codex for `gpt-image-2`,
- * OpenRouter for the 10 SHIP image models and Pollinations for the 11 SHIP
- * image models → 51 code-defined bindings.
+ * OpenRouter for the 19 SHIP image models and the 12 swept VIDEO models, and
+ * Pollinations for the 11 SHIP image models → 63 code-defined bindings.
  * Immutable by convention — merge copies for overrides (the registry never
  * mutates these).
  */
@@ -928,6 +1379,7 @@ export const BUILT_IN_BINDINGS: readonly ModelProviderBinding[] = [
   ...(gptImage2AzureBinding ? [gptImage2AzureBinding] : []),
   ...(gptImage2CodexBinding ? [gptImage2CodexBinding] : []),
   ...openRouterImageBindings,
+  ...openRouterVideoBindings,
   ...pollinationsImageBindings,
 ];
 

@@ -44,6 +44,15 @@
  *  11. THE RUN-LOG READ API — `GET /api/jobs/[taskId]/log` answers 200 with
  *      the trail of a known job and with a clear empty shape for an unknown
  *      one (never a 500).
+ *  12. THE VIDEO LANE (the family's async leg) — the OpenRouter video
+ *      bindings resolve (upstream ids, endpoint path, staging), the request
+ *      body speaks the video dialect (`duration` / `resolution` /
+ *      `aspect_ratio` / `seed` / `generate_audio` / `frame_images` /
+ *      `input_references`), the "auto" ratio is dropped, the duration is
+ *      re-clamped to the model's own limits, the submit is ASYNC (`202` +
+ *      `polling_url` → an absolute status URL), and the poll maps all six
+ *      statuses (pending / in_progress / completed / failed / cancelled /
+ *      expired) — the finished video arriving as raw BYTES.
  *
  * HOW TO RUN
  *
@@ -164,13 +173,17 @@ const PNG_BYTES = Buffer.from(
 const REF_URL = "https://example.com/reference-a.png";
 
 /** Minimal `Response`-alike for the stubbed fetch. */
-function fakeResponse(payload, { ok = true, status = 200 } = {}) {
+function fakeResponse(payload, { ok = true, status = 200, bytes = null, contentType = "application/json" } = {}) {
   const text = typeof payload === "string" ? payload : JSON.stringify(payload);
+  const buf = bytes ?? Buffer.from(text, "utf8");
   return {
     ok,
     status,
     text: async () => text,
-    headers: { get: () => "application/json" },
+    arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+    headers: {
+      get: (name) => (String(name).toLowerCase() === "content-type" ? contentType : "application/json"),
+    },
   };
 }
 
@@ -179,7 +192,7 @@ const capturedCalls = [];
 let stubbedResponse = () => fakeResponse({ data: [] });
 globalThis.fetch = async (url, init) => {
   capturedCalls.push({ url: String(url), init });
-  return stubbedResponse();
+  return stubbedResponse(url, init);
 };
 
 /** Swallow the adapter's request log unless HELIOS_SMOKE_VERBOSE=1. */
@@ -209,8 +222,11 @@ async function main() {
     getAvailableProvidersForModel,
     getOpenRouterBinding,
     getPollinationsBinding,
+    getDefaultBinding,
     OPENROUTER_BASE_URL,
     OPENROUTER_KEY_ENV,
+    OPENROUTER_IMAGE_PATH,
+    OPENROUTER_VIDEO_PATH,
     POLLINATIONS_BASE_URL,
     POLLINATIONS_KEY_ENV,
     POLLINATIONS_MEDIA_UPLOAD_URL,
@@ -225,8 +241,9 @@ async function main() {
   eq("openrouter family adapter is registered", familyProvider?.id, "openai-compat");
   eq("family adapter declares the openrouter alias", [...(familyProvider?.aliases ?? [])], ["openrouter", "pollinations"]);
   eq("openrouter staging default", orProvider?.mediaStaging, "data-url");
-  eq("openrouter submits synchronously", orProvider?.capabilities?.syncSubmission, true);
-  eq("openrouter has no polling", orProvider?.capabilities?.polling, false);
+  eq("openrouter submits synchronously (the image leg)", orProvider?.capabilities?.syncSubmission, true);
+  eq("the family implements polling (the async video leg)", orProvider?.capabilities?.polling, true);
+  eq("the family serves video", orProvider?.capabilities?.video, true);
   // The family DOES implement the upload hook (a backend that stages media as
   // "remote-url" needs it — see the Pollinations section below). OpenRouter
   // stages as "data-url", so the hook never runs for it.
@@ -236,7 +253,9 @@ async function main() {
 
   // ── 2. Bindings ───────────────────────────────────────────────────────────
   section("static OpenRouter bindings");
-  const orBindings = BUILT_IN_BINDINGS.filter((b) => b.providerId === "openrouter");
+  const orBindings = BUILT_IN_BINDINGS.filter(
+    (b) => b.providerId === "openrouter" && b.pathOverride === OPENROUTER_IMAGE_PATH,
+  );
   eq("19 OpenRouter image bindings are code-defined", orBindings.length, 19);
   const representative = getOpenRouterBinding();
   ok("a representative OpenRouter binding resolves", !!representative);
@@ -590,7 +609,7 @@ async function main() {
   ok("pollinations backend alias is registered", !!polProvider);
   eq("pollinations alias keeps the BACKEND id", polProvider?.id, "pollinations");
   eq("pollinations submits synchronously", polProvider?.capabilities?.syncSubmission, true);
-  eq("pollinations has no polling", polProvider?.capabilities?.polling, false);
+  eq("the family's poll implementation is shared", polProvider?.capabilities?.polling, true);
   eq("pollinations implements the media-upload hook", polProvider?.capabilities?.mediaUpload, true);
   ok("pollinations exposes uploadMedia", typeof polProvider?.uploadMedia === "function");
 
@@ -859,7 +878,7 @@ async function main() {
   // Restore the fixture's stub for the (optional) live step.
   globalThis.fetch = async (url, init) => {
     capturedCalls.push({ url: String(url), init });
-    return stubbedResponse();
+    return stubbedResponse(url, init);
   };
 
   // ── 11. The run-log read API ───────────────────────────────────────────────
@@ -889,6 +908,351 @@ async function main() {
   eq("an unknown task reports not_found", unknownPayload.status, "not_found");
   eq("an unknown task has an empty trail", unknownPayload.trail?.length, 0);
   eq("an unknown task has no provider", unknownPayload.providerId, null);
+
+  // ── 12. The VIDEO lane (the family's async leg) ───────────────────────────
+  section("OpenRouter video bindings");
+  const OR_VIDEO_UPSTREAM = {
+    "veo3_lite": ["google/veo-3.1-lite"],
+    "grok-imagine-1-5-preview": ["x-ai/grok-imagine-video-1.5", "x-ai/grok-imagine-video-1.5-lite"],
+    "kling-3.0": ["kwaiv/kling-3.0-pro", "kwaiv/kling-3.0-std"],
+    "seedance-2-fast": ["bytedance/seedance-2.0-fast"],
+    "seedance-2-mini": ["bytedance/seedance-2.0-mini"],
+    "minimax-h3": ["minimax/hailuo-3", "minimax/hailuo-3-max"],
+    "wan-2.6": ["alibaba/wan-2.6"],
+    "flux-video-edit": ["black-forest-labs/flux-video-edit"],
+    "flux-video-upscale": ["black-forest-labs/flux-video-upscale"],
+  };
+  const orVideoBindings = BUILT_IN_BINDINGS.filter(
+    (b) => b.providerId === "openrouter" && b.pathOverride === OPENROUTER_VIDEO_PATH,
+  );
+  eq("12 OpenRouter video bindings are code-defined", orVideoBindings.length, 12);
+  for (const [modelId, ids] of Object.entries(OR_VIDEO_UPSTREAM)) {
+    const bound = orVideoBindings
+      .filter((b) => b.modelId === modelId)
+      .map((b) => b.upstreamModelId)
+      .sort();
+    eq(`${modelId} upstream id(s)`, bound, [...ids].sort());
+  }
+  for (const b of orVideoBindings) {
+    eq(`${b.upstreamModelId} base URL`, b.baseUrl, OPENROUTER_BASE_URL);
+    eq(`${b.upstreamModelId} endpoint path`, b.pathOverride, OPENROUTER_VIDEO_PATH);
+    eq(`${b.upstreamModelId} key env`, b.keyEnv, OPENROUTER_KEY_ENV);
+    eq(`${b.upstreamModelId} stages as remote-url`, b.mediaStaging, "remote-url");
+    eq(`${b.upstreamModelId} is not the kie family`, b.family, "standard");
+  }
+
+  // The catalog entries added by the sweep — their Kie binding auto-derives.
+  for (const id of ["wan-2.6", "flux-video-edit", "flux-video-upscale"]) {
+    ok(`${id} is in the video catalog`, !!modelConfig.VIDEO_MODELS.find((m) => m.id === id));
+    let defaultBinding = null;
+    try {
+      defaultBinding = getDefaultBinding(id);
+    } catch {
+      defaultBinding = null;
+    }
+    ok(`${id} resolves a default (kie) binding`, !!defaultBinding, "getDefaultBinding threw");
+    eq(`${id} default binding is kie`, defaultBinding?.providerId, "kie");
+    ok(`${id} provider union includes openrouter`, getAvailableProvidersForModel(id).includes("openrouter"));
+  }
+  const wanResolved = registryMod.resolveForModel("wan-2.6", "openrouter", []);
+  eq("resolveForModel picks the OpenRouter video binding", wanResolved.binding.upstreamModelId, "alibaba/wan-2.6");
+  eq("resolveForModel keeps the video endpoint path", wanResolved.binding.pathOverride, OPENROUTER_VIDEO_PATH);
+
+  section("OpenRouter video request body (stubbed fetch)");
+  const videoCredentials = {
+    providerId: "openrouter",
+    apiKey: "sk-or-smoke-key",
+    baseUrl: null,
+    extra: {},
+    keySource: "db",
+  };
+  const remoteMedia = (url, kind) => ({ originalUrl: url, kind, strategy: "remote-url", url });
+  const videoModel = modelConfig.VIDEO_MODELS.find((m) => m.id === "seedance-2-mini");
+  ok("seedance-2-mini is in the video catalog", !!videoModel);
+  const videoBinding = orVideoBindings.find((b) => b.modelId === "seedance-2-mini");
+  const videoInput = {
+    taskId: "smoke-video-1",
+    kind: "video",
+    model: videoModel,
+    binding: videoBinding,
+    prompt: "a paper boat on a rainy street",
+    params: { aspectRatio: "16:9", duration: 6, resolution: "720p", sound: false, seed: 42 },
+    media: {
+      startFrame: remoteMedia("https://example.com/first.png", "image"),
+      endFrame: remoteMedia("https://example.com/last.png", "image"),
+      references: [remoteMedia("https://example.com/ref.png", "image")],
+      audioRefs: [remoteMedia("https://example.com/voice.mp3", "audio")],
+    },
+    credentials: videoCredentials,
+  };
+
+  capturedCalls.length = 0;
+  stubbedResponse = () =>
+    fakeResponse({ id: "gen-vid-abc", polling_url: "/api/v1/videos/gen-vid-abc", status: "pending" }, { status: 202 });
+  const videoOutcome = await quiet(() => orProvider.submit(videoInput));
+  eq("the video submit hits the /videos endpoint", capturedCalls[0]?.url, `${OPENROUTER_BASE_URL}/videos`);
+  eq("the video submit is a POST", capturedCalls[0]?.init?.method, "POST");
+  eq("the video submit carries the key", capturedCalls[0]?.init?.headers?.Authorization, "Bearer sk-or-smoke-key");
+  const vBody = JSON.parse(String(capturedCalls[0]?.init?.body ?? "{}"));
+  eq("video body model (upstream id)", vBody.model, "bytedance/seedance-2.0-mini");
+  eq("video body prompt", vBody.prompt, videoInput.prompt);
+  eq("video body duration", vBody.duration, 6);
+  eq("video body resolution", vBody.resolution, "720p");
+  eq("video body aspect_ratio", vBody.aspect_ratio, "16:9");
+  eq("video body seed", vBody.seed, 42);
+  eq(
+    "video body frame_images (first + last frame)",
+    vBody.frame_images,
+    [
+      { type: "image_url", image_url: { url: "https://example.com/first.png" }, frame_type: "first_frame" },
+      { type: "image_url", image_url: { url: "https://example.com/last.png" }, frame_type: "last_frame" },
+    ],
+  );
+  eq(
+    "video body input_references (image + audio)",
+    vBody.input_references,
+    [
+      { type: "image_url", image_url: { url: "https://example.com/ref.png" } },
+      { type: "audio_url", audio_url: { url: "https://example.com/voice.mp3" } },
+    ],
+  );
+  ok("the video body has no generate_audio (the model has no audio)", vBody.generate_audio === undefined);
+  ok(
+    "the video body carries no unexpected field",
+    Object.keys(vBody).every((k) =>
+      ["model", "prompt", "duration", "resolution", "aspect_ratio", "seed", "frame_images", "input_references"].includes(k),
+    ),
+    JSON.stringify(Object.keys(vBody)),
+  );
+  eq("the video submit is async", videoOutcome.mode, "async");
+  eq("the upstream task id", videoOutcome.upstreamTaskId, "gen-vid-abc");
+  eq(
+    "the relative polling_url is resolved to an absolute status URL",
+    videoOutcome.providerMeta?.statusUrl,
+    "https://openrouter.ai/api/v1/videos/gen-vid-abc",
+  );
+  eq("the provider meta keeps the upstream model", videoOutcome.providerMeta?.upstreamModelId, "bytedance/seedance-2.0-mini");
+
+  // The "auto" ratio is not in the upstream enum — it is dropped, never sent.
+  capturedCalls.length = 0;
+  await quiet(() =>
+    orProvider.submit({ ...videoInput, params: { ...videoInput.params, aspectRatio: "auto" } }),
+  );
+  const autoBody = JSON.parse(String(capturedCalls[0]?.init?.body ?? "{}"));
+  ok("the \"auto\" aspect ratio is dropped", autoBody.aspect_ratio === undefined, JSON.stringify(autoBody));
+
+  section("OpenRouter video caps (clamp / drop / default)");
+  // The duration is re-clamped to the model's own limits (the catalog offers 4).
+  const minimaxBinding = orVideoBindings.find((b) => b.upstreamModelId === "minimax/hailuo-3");
+  const minimaxModel = modelConfig.VIDEO_MODELS.find((m) => m.id === "minimax-h3");
+  capturedCalls.length = 0;
+  await quiet(() =>
+    orProvider.submit({
+      ...videoInput,
+      binding: minimaxBinding,
+      model: minimaxModel,
+      params: { aspectRatio: "9:16", duration: 4, resolution: "768P", sound: false },
+    }),
+  );
+  const mmBody = JSON.parse(String(capturedCalls[0]?.init?.body ?? "{}"));
+  eq("the duration is re-clamped to the model's minimum", mmBody.duration, 5);
+  eq("the catalog's 768P maps to the upstream enum", mmBody.resolution, "768p");
+
+  // The catalog's 2K tier is not in the upstream enum — dropped.
+  capturedCalls.length = 0;
+  await quiet(() =>
+    orProvider.submit({
+      ...videoInput,
+      binding: minimaxBinding,
+      model: minimaxModel,
+      params: { aspectRatio: "9:16", duration: 8, resolution: "2K", sound: false },
+    }),
+  );
+  const mm2Body = JSON.parse(String(capturedCalls[0]?.init?.body ?? "{}"));
+  ok("the unsupported 2K tier is dropped", mm2Body.resolution === undefined, JSON.stringify(mm2Body));
+
+  // The Veo catalog entry has NO duration picker → the binding's own default.
+  const veoBinding = orVideoBindings.find((b) => b.upstreamModelId === "google/veo-3.1-lite");
+  const veoModel = modelConfig.VIDEO_MODELS.find((m) => m.id === "veo3_lite");
+  capturedCalls.length = 0;
+  await quiet(() =>
+    orProvider.submit({
+      ...videoInput,
+      binding: veoBinding,
+      model: veoModel,
+      params: { aspectRatio: "16:9", duration: 0, resolution: "720p", sound: false },
+    }),
+  );
+  const veoBody = JSON.parse(String(capturedCalls[0]?.init?.body ?? "{}"));
+  eq("a model without a duration picker sends the binding's default", veoBody.duration, 6);
+  eq("the audio flag rides the audio-capable model", veoBody.generate_audio, false);
+
+  // The catalog's 4k tier is not in the upstream enum — dropped.
+  capturedCalls.length = 0;
+  await quiet(() =>
+    orProvider.submit({
+      ...videoInput,
+      binding: veoBinding,
+      model: veoModel,
+      params: { aspectRatio: "16:9", duration: 4, resolution: "4k", sound: false },
+    }),
+  );
+  const veo4kBody = JSON.parse(String(capturedCalls[0]?.init?.body ?? "{}"));
+  ok("the unsupported 4k tier is dropped", veo4kBody.resolution === undefined, JSON.stringify(veo4kBody));
+
+  // Kling models the quality as a MODE — the resolution is pinned by the binding.
+  const klingBinding = orVideoBindings.find((b) => b.upstreamModelId === "kwaiv/kling-3.0-pro");
+  const klingModel = modelConfig.VIDEO_MODELS.find((m) => m.id === "kling-3.0");
+  capturedCalls.length = 0;
+  await quiet(() =>
+    orProvider.submit({
+      ...videoInput,
+      binding: klingBinding,
+      model: klingModel,
+      params: { aspectRatio: "16:9", duration: 5, resolution: "480p", sound: false, mode: "pro" },
+    }),
+  );
+  const klingBody = JSON.parse(String(capturedCalls[0]?.init?.body ?? "{}"));
+  eq("the binding pins the resolution the upstream has", klingBody.resolution, "720p");
+  ok("the catalog's mode never rides the body", klingBody.mode === undefined, JSON.stringify(klingBody));
+
+  // Grok 1.5 takes a FIRST FRAME only — the staged reference rides as the frame.
+  const grokBinding = orVideoBindings.find((b) => b.upstreamModelId === "x-ai/grok-imagine-video-1.5");
+  const grokModel = modelConfig.VIDEO_MODELS.find((m) => m.id === "grok-imagine-1-5-preview");
+  capturedCalls.length = 0;
+  await quiet(() =>
+    orProvider.submit({
+      ...videoInput,
+      binding: grokBinding,
+      model: grokModel,
+      media: { references: [remoteMedia("https://example.com/ref.png", "image")] },
+      params: { aspectRatio: "16:9", duration: 8, resolution: "480p", sound: false },
+    }),
+  );
+  const grokBody = JSON.parse(String(capturedCalls[0]?.init?.body ?? "{}"));
+  eq(
+    "the reference rides as the first frame",
+    grokBody.frame_images,
+    [{ type: "image_url", image_url: { url: "https://example.com/ref.png" }, frame_type: "first_frame" }],
+  );
+  ok("the reference is not sent twice", grokBody.input_references === undefined, JSON.stringify(grokBody));
+
+  section("OpenRouter video polling");
+  const pollMeta = {
+    upstreamTaskId: "gen-vid-abc",
+    family: "standard",
+    statusUrl: "https://openrouter.ai/api/v1/videos/gen-vid-abc",
+    upstreamModelId: "bytedance/seedance-2.0-mini",
+  };
+  capturedCalls.length = 0;
+  for (const status of ["pending", "in_progress"]) {
+    stubbedResponse = () => fakeResponse({ id: "gen-vid-abc", status });
+    const outcome = await orProvider.poll("gen-vid-abc", "video", videoCredentials, pollMeta);
+    eq(`${status} → pending`, outcome.state, "pending");
+  }
+  eq("the poll hits the status URL", capturedCalls[0]?.url, "https://openrouter.ai/api/v1/videos/gen-vid-abc");
+  eq("the poll carries the key", capturedCalls[0]?.init?.headers?.Authorization, "Bearer sk-or-smoke-key");
+
+  // Completed → the bytes are fetched from the (authenticated) content endpoint.
+  const MP4_BYTES = Buffer.from("00000018667479706d70343200000000", "hex");
+  capturedCalls.length = 0;
+  stubbedResponse = (url) =>
+    String(url).includes("/content")
+      ? fakeResponse(null, { bytes: MP4_BYTES, contentType: "video/mp4" })
+      : fakeResponse({
+          id: "gen-vid-abc",
+          status: "completed",
+          urls: ["https://cdn.example.com/signed.mp4"],
+          unsigned_urls: ["https://openrouter.ai/api/v1/videos/gen-vid-abc/content?index=0"],
+        });
+  const doneOutcome = await orProvider.poll("gen-vid-abc", "video", videoCredentials, pollMeta);
+  eq("completed → done", doneOutcome.state, "done");
+  eq("the finished video is one raw buffer", doneOutcome.buffers?.length, 1);
+  eq("the buffer carries the exact bytes", Buffer.compare(doneOutcome.buffers?.[0]?.buffer ?? Buffer.alloc(0), MP4_BYTES), 0);
+  eq("the buffer mime type", doneOutcome.buffers?.[0]?.mimeType, "video/mp4");
+  ok(
+    "the content endpoint is fetched with ?index=0",
+    capturedCalls.some((c) => c.url.endsWith("/content?index=0")),
+    JSON.stringify(capturedCalls.map((c) => c.url)),
+  );
+  ok(
+    "the content endpoint carries the key",
+    capturedCalls.filter((c) => c.url.includes("/content")).every((c) => c.init?.headers?.Authorization === "Bearer sk-or-smoke-key"),
+  );
+
+  // A finished task without a reachable content endpoint keeps its URLs.
+  capturedCalls.length = 0;
+  stubbedResponse = (url) =>
+    String(url).includes("/content")
+      ? fakeResponse("nope", { ok: false, status: 404 })
+      : fakeResponse({
+          id: "gen-vid-abc",
+          status: "completed",
+          urls: ["https://cdn.example.com/signed.mp4"],
+          unsigned_urls: ["https://openrouter.ai/api/v1/videos/gen-vid-abc/content?index=0"],
+        });
+  const videoUrlOutcome = await orProvider.poll("gen-vid-abc", "video", videoCredentials, pollMeta);
+  eq("completed (no bytes) → done", videoUrlOutcome.state, "done");
+  eq(
+    "the fallback returns the upstream urls",
+    videoUrlOutcome.mediaUrls,
+    ["https://openrouter.ai/api/v1/videos/gen-vid-abc/content?index=0"],
+  );
+
+  // The three terminal-failure statuses.
+  for (const status of ["failed", "cancelled", "expired"]) {
+    stubbedResponse = () => fakeResponse({ id: "gen-vid-abc", status, error: { code: 400, message: "boom" } });
+    const outcome = await orProvider.poll("gen-vid-abc", "video", videoCredentials, pollMeta);
+    eq(`${status} → error`, outcome.state, "error");
+    eq(`${status} carries the job's error string`, outcome.error, "boom");
+  }
+
+  // The image leg never polls.
+  const imagePoll = await orProvider.poll("smoke-task-1", "image", videoCredentials, pollMeta);
+  eq("the image leg refuses to poll", imagePoll.state, "error");
+
+  // ── 13. The route (provider resolution → stage → submitJob → { taskId }) ───
+  section("POST /api/generate-video (openrouter)");
+  const videoRoute = await import(pathToFileURL(join(ROOT, "app/api/generate-video/route.ts")).href);
+  const savedRouteVideoKey = process.env[OPENROUTER_KEY_ENV];
+  process.env[OPENROUTER_KEY_ENV] = "sk-or-env-key";
+  capturedCalls.length = 0;
+  stubbedResponse = () =>
+    fakeResponse({ id: "gen-vid-route", polling_url: "/api/v1/videos/gen-vid-route", status: "pending" }, { status: 202 });
+  const routeRes = await videoRoute.POST(
+    new Request("http://local/api/generate-video", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "wan-2.6",
+        providerId: "openrouter",
+        prompt: "a lighthouse in a storm",
+        duration: 5,
+        aspect_ratio: "16:9",
+      }),
+    }),
+  );
+  if (savedRouteVideoKey === undefined) delete process.env[OPENROUTER_KEY_ENV];
+  else process.env[OPENROUTER_KEY_ENV] = savedRouteVideoKey;
+  eq("the video route answers 200", routeRes.status, 200);
+  const routePayload = await routeRes.json();
+  ok("the video route returns a taskId", typeof routePayload.taskId === "string" && routePayload.taskId.length > 0);
+  // The upstream submit runs in the background — the route answers first.
+  for (let i = 0; i < 50 && !capturedCalls.some((c) => c.url.includes("/videos")); i += 1) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  const routeCall = capturedCalls.find((c) => c.url.includes("/videos"));
+  ok(
+    "the route drove the OpenRouter video endpoint",
+    !!routeCall,
+    JSON.stringify(capturedCalls.map((c) => c.url)),
+  );
+  eq("the route's upstream URL", routeCall?.url, `${OPENROUTER_BASE_URL}/videos`);
+  const routeBody = JSON.parse(String(routeCall?.init?.body ?? "{}"));
+  eq("the route's upstream model", routeBody.model, "alibaba/wan-2.6");
+  eq("the route's duration", routeBody.duration, 5);
+  eq("the route's aspect ratio", routeBody.aspect_ratio, "16:9");
+  eq("the route's prompt", routeBody.prompt, "a lighthouse in a storm");
 
   // ── Live step (opt-in) ────────────────────────────────────────────────────
   section("live step");

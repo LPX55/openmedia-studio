@@ -1,11 +1,27 @@
 # STATE
 status: done        # active | paused | blocked | done
-focus: provider migration journey documented (docs/provider-migration-journey.md); P1→P6 all committed on feat/pluggable-providers at 7208ce4, nothing pushed
-next: build the workflow automations pack (realistic image + video workflows across input types and endpoints); live video test still awaits a spend decision; merge awaits push approval
+focus: workflow template pack shipped on feat/pluggable-providers at ce18cba — 7 templates (6 new + legacy UGC), gallery with per-template art, offline validator (623 assertions), idle-format hints on empty generator nodes; nothing pushed
+next: get approval to run one template live end-to-end (image + video spend); then push/merge; open items — unverified kie apiIds for the 10 new catalog rows, "Assets" nav placeholder, retry hardening, dead kieJobPoller
 blockers: none
 updated: 2026-10-21
 
 ## Notes
+
+- 2026-10-21 — WORKFLOW TEMPLATE PACK shipped in four commits on
+  `feat/pluggable-providers`: `fd886a4` (pack + validator + gallery + R2-thumbnail
+  crash fix), `19f8a33` (idle format hint in empty generator nodes), `cbb1d61`
+  (adaptive-only ratio no longer collapses a video card), `ce18cba` (28 preview
+  SVGs, taller campaign brief, motion-transfer layout). Seven templates —
+  product still→motion, character set, assistant brief→campaign kit, first/last
+  frame transition, clip remix (video in), motion transfer (video→video), plus
+  the legacy UGC board. All graphs are data (`nodes`/`edges`/`nodeCounters`)
+  handed to `createSpace`, so they resolve through the same bindings as a
+  hand-built canvas. `pnpm check:workflows` = 623 offline assertions over models,
+  ratios, handles, durations, quality options, single-slot wires, prompt
+  sources, counters, and the idle-start rule. Verified by headless-Chrome
+  screenshots: dashboard gallery, product ad, character set, campaign brief,
+  clip remix, motion transfer. No live runs executed (spend not approved);
+  reference inputs are local placeholders the user replaces.
 
 - 2026-10-21 — JOURNEY DOC: `docs/provider-migration-journey.md` records the
   whole provider migration as narrative — starting state (client-driven routing,

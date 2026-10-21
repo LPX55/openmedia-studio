@@ -1,4 +1,4 @@
-# Repository Atlas: HeliosGen
+# Repository Atlas: OpenMedia Studio
 
 ## Project Responsibility
 Free & open-source visual AI workflow builder for image and video generation. Infinite node-based canvas where users chain prompts, models, reference images, and automations. 100% local desktop app (Tauri 2 + Next.js sidecar); generations run through the user's own kie.ai / Azure / Replicate / Codex CLI keys. No accounts, no cloud state — SQLite + local disk under per-user app-data dirs.

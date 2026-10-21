@@ -1,7 +1,7 @@
 <p align="center">
   <img
-    src="https://raw.githubusercontent.com/SegFault42/HeliosGen/main/public/HG.svg"
-    alt="HeliosGen"
+    src="https://raw.githubusercontent.com/LPX55/openmedia-studio/main/public/HG.svg"
+    alt="OpenMedia Studio"
     width="64"
   />
 </p>
@@ -15,12 +15,12 @@
 
 # ▶️ Run it
 
-HeliosGen is a local-first Next.js app — no account, no server, no cloud setup.
+OpenMedia Studio is a local-first Next.js app — no account, no server, no cloud setup.
 All you need is Node 22+ (`node:sqlite` powers the local database):
 
 ```bash
-git clone https://github.com/SegFault42/HeliosGen
-cd HeliosGen
+git clone https://github.com/LPX55/openmedia-studio
+cd openmedia-studio
 npm install
 npm run dev
 ```
@@ -32,7 +32,7 @@ Open http://localhost:3000. For a production build: `npm run build`, then
 
 ## 🚀 First run
 
-1. Launch HeliosGen.
+1. Launch OpenMedia Studio.
 2. Open **Settings → API Keys** and add a key for the provider you want to
    use — a generation backend (Kie.ai, Azure, OpenRouter, Pollinations, …)
    and, optionally, a separate chat key for the assistant.
@@ -82,9 +82,9 @@ Delete those folders to reset the app.
   <img width="872" height="502" alt="Prompt assistant interface" src="https://github.com/user-attachments/assets/17ba972c-bd8a-49a7-b367-4ef906fe3e17" />
 </p>
 
-# ✨ HeliosGen
+# ✨ OpenMedia Studio
 
-HeliosGen is a free & open source visual AI workflow builder for image and video generation.
+OpenMedia Studio is a free & open source visual AI workflow builder for image and video generation.
 
 Build reusable AI pipelines with:
 - infinite node-based workflows,
@@ -101,7 +101,7 @@ No cloud, no accounts — just a local app and your own provider keys.
 
 # 🔌 Providers
 
-HeliosGen talks to generation backends through a pluggable provider registry.
+OpenMedia Studio talks to generation backends through a pluggable provider registry.
 Built in: **Kie.ai**, **Azure AI Foundry**, **Codex CLI**, plus a generic
 **OpenAI-compatible family** — point it at OpenRouter, Pollinations, a
 self-hosted gateway, or any endpoint that speaks the OpenAI images format,
@@ -199,7 +199,7 @@ More models are coming.
 
 # 🤖 Codex CLI (optional — alternate GPT Image 2 backend)
 
-Instead of routing GPT Image 2 through a hosted generation provider, HeliosGen can generate through your own ChatGPT Codex subscription via [`codex-imagegen-cli`](https://github.com/jdmnk/codex-imagegen-cli). HeliosGen picks up `codex` from your `PATH` automatically; if it's missing, the feature just shows **NOT CONFIGURED** and everything else keeps working.
+Instead of routing GPT Image 2 through a hosted generation provider, OpenMedia Studio can generate through your own ChatGPT Codex subscription via [`codex-imagegen-cli`](https://github.com/jdmnk/codex-imagegen-cli). OpenMedia Studio picks up `codex` from your `PATH` automatically; if it's missing, the feature just shows **NOT CONFIGURED** and everything else keeps working.
 
 Requirements:
 - A ChatGPT Plus/Pro/Team/Enterprise account with Codex access
@@ -244,8 +244,8 @@ In **Settings → Image Models**, set GPT Image 2's provider toggle to **Codex C
 # 🛠️ Develop
 
 ```bash
-git clone https://github.com/SegFault42/HeliosGen
-cd HeliosGen
+git clone https://github.com/LPX55/openmedia-studio
+cd openmedia-studio
 npm install
 npm run dev
 ```
@@ -259,7 +259,7 @@ supported) for a production server.
 
 Contributions are welcome.
 
-If you find a bug, have an idea, or want to improve HeliosGen:
+If you find a bug, have an idea, or want to improve OpenMedia Studio:
 - Open an issue
 - Submit a pull request
 - Share feedback or feature requests

@@ -1,11 +1,28 @@
 # STATE
 status: active      # active | paused | blocked | done
-focus: OpenRouter VIDEO lane verified live on feat/pluggable-providers — grok-1.5 and seedance-mini both produced real clips through /api/generate-video; per-model generate_audio declared where upstream supports it (seedance/hailuo/wan), omitted where it does not (grok)
-next: push this lane commit; then decide template E2E path — OR video needs public frame URLs (kie-style upload does not exist upstream), so templates still need either a kie key or a public media host; open items — unverified kie apiIds for the 10 new catalog rows, "Assets" nav placeholder, retry hardening, dead kieJobPoller
-blockers: none (OR key capped at $1/day — $0.34 left today; expires ~2026-10-21)
+focus: repo forked to LPX55/openmedia-studio and renamed in-tree (package name, app title, sidebar brand + links, README/DESKTOP, update-check repo, alt/aria text); OpenRouter video lane verified live earlier on this branch
+next: verify the fork's CI/README render, decide whether to rename src-tauri productName + bundle id (deliberately untouched — breaks desktop update continuity), then merge feat/pluggable-providers; open items — unverified kie apiIds for the 10 new catalog rows, "Assets" nav placeholder, retry hardening, dead kieJobPoller, template E2E needs a public media host or kie key
+blockers: none (OR key $1/day cap, expires ~2026-10-21)
 updated: 2026-10-21
 
 ## Notes
+
+- 2026-10-21 — FORK + RENAME: `SegFault42/HeliosGen` is now forked to **`LPX55/openmedia-studio`** and
+  the working tree renamed to match on every user-facing surface — `package.json`
+  name, `app/layout.tsx` title, sidebar brand text and GitHub links, hero label,
+  toaster alt, `update-check` repo (functional: it would have silently 404'd),
+  README (clone URL, badge raw URL, prose, still Tauri-free), DESKTOP.md headings,
+  `.env.example` header, workflow-import error string, `mark.svg` aria-label, and
+  the codemap headers. Remotes repointed: `upstream` = SegFault42/HeliosGen,
+  `origin` = LPX55/openmedia-studio; `feat/pluggable-providers` pushed with
+  upstream tracking (the earlier 403 push is resolved — the fork belongs to the
+  authenticated account). DELIBERATELY UNCHANGED, as functional identity rather
+  than branding: `HELIOS_DATA_DIR`/`HELIOS_MEDIA_DIR`, the localStorage keys
+  (`heliosgen-guest`, `heliosgen-chats-guest`), the workflow export format id
+  `heliosgen-workflow`, the kie upload path, and everything under `src-tauri/`
+  (productName, bundle id `cash.sdd.helios.desktop`, Cargo bin, sidecar) — so
+  DESKTOP.md still names `HeliosGen.app`/`.dmg` because that is what the desktop
+  build actually produces. A src-tauri rename is a separate, riskier pass.
 
 - 2026-10-21 — OPENROUTER VIDEO LANE OPENED AND VERIFIED LIVE (not just offline):
   three real jobs through `POST /api/generate-video` with `providerId: "openrouter"`,

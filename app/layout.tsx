@@ -27,7 +27,7 @@ const doto = Doto({
 });
 
 export const metadata: Metadata = {
-  title: "HeliosGen",
+  title: "OpenMedia Studio",
   description: "Build AI image & video generation workflows visually",
   icons: {
     icon: [{ url: "/mark.svg", type: "image/svg+xml" }],

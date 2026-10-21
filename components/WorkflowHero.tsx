@@ -113,7 +113,7 @@ export function WorkflowHero() {
                       "linear-gradient(to right, rgba(255,255,255,0.45), rgba(45,212,191,0.95), rgba(255,255,255,0.45))",
                   }}
                 >
-                  HeliosGen
+                  OpenMedia Studio
                 </p>
                 <h1 className="hero-title text-[28px] leading-[32px] font-bold tracking-[-1.1px] text-white uppercase md:text-[38px] md:leading-[40px] md:tracking-[-1.5px]">
                   Build AI workflows

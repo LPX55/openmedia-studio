@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
  * (caught by {@link DesktopLinkHandler}).
  */
 
-const DISMISS_KEY = "helios-update-dismissed"; // holds the version the user dismissed
+const DISMISS_KEY = "openmedia-update-dismissed"; // holds the version the user dismissed
 
 const AMBER = "245,158,11";
 

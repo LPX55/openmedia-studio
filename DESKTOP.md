@@ -1,4 +1,4 @@
-# HeliosGen Desktop (Tauri)
+# OpenMedia Studio Desktop (Tauri)
 
 A fully local, self-contained desktop app. No accounts, no Supabase, no R2, no
 ngrok — it runs the Next.js app as a bundled Node sidecar and stores everything
@@ -157,7 +157,7 @@ plus every referenced image/video — portable and shareable as a file
       native-module signing in `build-server.mjs`); needs a Developer ID cert to
       actually run.
 - [x] Update check — `app/api/update-check/route.ts` asks the GitHub Releases
-      API (`repos/SegFault42/HeliosGen/releases/latest`, cached ~1 h) whether
+      API (`repos/LPX55/openmedia-studio/releases/latest`, cached ~1 h) whether
       `tag_name` is newer than `NEXT_PUBLIC_APP_VERSION` (baked from
       `tauri.conf.json` by `build-server.mjs` / `dev.mjs`). When it is,
       `components/UpdateBanner.tsx` shows a yellow "Update available" bar under

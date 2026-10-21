@@ -1,7 +1,7 @@
 # /api/workflows — local workflow ("space") storage
 
 ## Responsibility
-Read/replace the whole set of local workflow spaces ("spaces") — HeliosGen's
+Read/replace the whole set of local workflow spaces ("spaces") — OpenMedia Studio's
 multi-workspace document container — persisted in the SQLite DB.
 
 ## Design

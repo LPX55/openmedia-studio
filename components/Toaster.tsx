@@ -81,7 +81,7 @@ function RichToastItem({ toast, onDismiss, onClick }: { toast: Toast; onDismiss:
         display: "flex", alignItems: "center", justifyContent: "center",
         flexShrink: 0, overflow: "hidden",
       }}>
-        <Image src="/mark.svg" alt="HeliosGen" width={32} height={32} />
+        <Image src="/mark.svg" alt="OpenMedia Studio" width={32} height={32} />
       </div>
 
       {/* Text */}

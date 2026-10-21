@@ -1,6 +1,6 @@
 # lib/
 
-Shared, framework-light core for HeliosGen: client Zustand stores, graph
+Shared, framework-light core for OpenMedia Studio: client Zustand stores, graph
 execution/pipeline logic, server-side job persistence/polling, media storage
 facades, and model/provider config. No `"use client"` directives here except the
 React hooks — imported by both `components/` (client) and `app/api/` (server).

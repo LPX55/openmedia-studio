@@ -7,7 +7,7 @@ hotlink protection on the origin never blocks ingest.
 ## Design
 - `POST` body `{ url }`; must parse as `http:`/`https:` (400 otherwise).
 - `maxDuration = 60`; `MAX_BYTES = 50 MB` (413 when exceeded).
-- Fetch with spoofed `User-Agent` (`Mozilla/5.0 (compatible; HeliosGen/1.0)`) and
+- Fetch with spoofed `User-Agent` (`Mozilla/5.0 (compatible; OpenMediaStudio/1.0)`) and
   `redirect: "follow"`; upstream non-OK → 400 with status text.
 - Media type decided by upstream `Content-Type` prefix — only `image/*` and
   `video/*` accepted (400 otherwise).

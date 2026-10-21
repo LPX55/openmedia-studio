@@ -132,7 +132,7 @@ function GitHubButtons() {
   const [stats, setStats] = React.useState<{ stars: number; forks: number } | null>(null);
 
   React.useEffect(() => {
-    fetch("https://api.github.com/repos/segfault42/HeliosGen")
+    fetch("https://api.github.com/repos/LPX55/openmedia-studio")
       .then(r => r.json())
       .then(d => setStats({ stars: d.stargazers_count, forks: d.forks_count }))
       .catch(() => {});
@@ -142,11 +142,11 @@ function GitHubButtons() {
 
   return (
     <div className="group-data-[collapsible=icon]:hidden flex gap-1 justify-center px-2 pb-3">
-      <a href="https://github.com/segfault42/HeliosGen" target="_blank" rel="noreferrer" className={btnCls}>
+      <a href="https://github.com/LPX55/openmedia-studio" target="_blank" rel="noreferrer" className={btnCls}>
         <Star size={14} strokeWidth={1.8} />
         {stats && <span className="text-xs text-muted-foreground tabular-nums">{fmtCount(stats.stars)}</span>}
       </a>
-      <a href="https://github.com/segfault42/HeliosGen/fork" target="_blank" rel="noreferrer" className={btnCls}>
+      <a href="https://github.com/LPX55/openmedia-studio/fork" target="_blank" rel="noreferrer" className={btnCls}>
         <ForkIcon />
         {stats && <span className="text-xs text-muted-foreground tabular-nums">{fmtCount(stats.forks)}</span>}
       </a>
@@ -863,7 +863,7 @@ export function AppSidebar() {
           <LogoIcon />
           <span className="text-white text-[22px] leading-none select-none"
             style={{ fontFamily: "'Georgia','Times New Roman',serif", fontStyle: "italic" }}>
-            HeliosGen
+            OpenMedia Studio
           </span>
         </div>
         {/* Collapsed: logo fades to trigger on hover */}

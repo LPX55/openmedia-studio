@@ -1,6 +1,6 @@
 # app/api — Route Overview
 
-Next.js App Router route handlers for HeliosGen. All routes are guest-scoped
+Next.js App Router route handlers for OpenMedia Studio. All routes are guest-scoped
 (`GUEST_USER_ID` from `lib/guestMode`) and persist to the local SQLite DB
 (`lib/guest/db.ts`) plus local disk media (`lib/storage.ts` → `lib/guest/localStorage.ts`,
 served same-origin under `/generated/...`). Names like `cdnUrl`, `ensureR2`,

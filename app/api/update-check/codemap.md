@@ -7,7 +7,7 @@ changelog modal. No self-install — it just links to the release page.
 
 ## Design
 - `export const runtime = "nodejs"`, `dynamic = "force-dynamic"`.
-- Repo hard-coded `SegFault42/HeliosGen`; endpoint `GET /repos/…/releases/latest`.
+- Repo hard-coded `LPX55/openmedia-studio`; endpoint `GET /repos/…/releases/latest`.
 - Running version = `NEXT_PUBLIC_APP_VERSION` (baked from `src-tauri/tauri.conf.json`
   by `scripts/desktop/build-server.mjs` / `dev.mjs`), default `0.0.0`.
 - In-module cache: 1 h TTL (`CACHE_TTL_MS`) to respect GitHub's unauthenticated
@@ -24,8 +24,8 @@ changelog modal. No self-install — it just links to the release page.
    name?, notes?, url?, publishedAt? }` → cache → respond.
 
 ## Integration
-- **GitHub**: `https://api.github.com/repos/SegFault42/HeliosGen/releases/latest`
-  (UA `HeliosGen-Desktop/<version>`), release page `…/releases/latest`.
+- **GitHub**: `https://api.github.com/repos/LPX55/openmedia-studio/releases/latest`
+  (UA `OpenMediaStudio-Desktop/<version>`), release page `…/releases/latest`.
 - **Env**: `NEXT_PUBLIC_APP_VERSION`, `NEXT_PUBLIC_UPDATE_CHECK_FORCE`.
 - **Response**: `UpdatePayload` JSON as above (never errors — failures collapse to
   `updateAvailable: false`).

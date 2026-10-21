@@ -135,7 +135,7 @@ export async function importWorkflowZip(file: File): Promise<ImportedWorkflow> {
   }
 
   if (manifest.format !== WORKFLOW_FORMAT) {
-    throw new Error("this zip is not a HeliosGen workflow export");
+    throw new Error("this zip is not an OpenMedia Studio workflow export");
   }
 
   const wf = manifest.workflow ?? {};

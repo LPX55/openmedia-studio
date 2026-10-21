@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Top-level React layer for the HeliosGen app: the workflow canvas (ReactFlow host), shell chrome (sidebar, toolbars, banners, toasts), app-level modals (settings, media picker), and the dashboard/hero screens for space selection. Owns all `*.tsx` files in this directory (node/edge/UI primitives live in the subfolders — see their own codemaps):
+Top-level React layer for the OpenMedia Studio app: the workflow canvas (ReactFlow host), shell chrome (sidebar, toolbars, banners, toasts), app-level modals (settings, media picker), and the dashboard/hero screens for space selection. Owns all `*.tsx` files in this directory (node/edge/UI primitives live in the subfolders — see their own codemaps):
 
 - **Canvas core**: `WorkflowCanvas` (ReactFlow host + all canvas interaction), `SelectionToolbar`, `CanvasToolbar`, `AddNodeMenu`, `NodePickerMenu`
 - **Shell / chrome**: `AppSidebar`, `GlobalModals`, `Toaster`, `KieBanner`, `UpdateBanner`, `DesktopLinkHandler`, `DragDropGuard`

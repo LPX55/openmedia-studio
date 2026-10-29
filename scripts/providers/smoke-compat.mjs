@@ -5,6 +5,10 @@
  *
  * WHAT IT CHECKS (fully offline — no network, no API key, no build step):
  *
+ * The shared harness (assertions, Response-alike streaming + mid-frame splits,
+ * SSE replay, signal-aware fetch stub) lives in ./smoke-lib.mjs; this fixture
+ * keeps only the provider-specific coverage and fixtures.
+ *
  *   1. REGISTRY — the bootstrap boots and the "openrouter" BACKEND alias of the
  *      openai-compat family is registered (id stays the backend id).
  *   2. BINDINGS — the static OpenRouter image bindings resolve: upstream ids,
@@ -73,6 +77,18 @@ import { register } from "node:module";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  HARNESS_VERSION,
+  eq,
+  fakeResponse,
+  failures,
+  installFetchStub,
+  ok,
+  passed,
+  quiet,
+  section,
+  sseFrames,
+} from "./smoke-lib.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -137,32 +153,9 @@ const SMOKE_DIR = join(ROOT, "public", "generated", ".smoke-compat");
 process.env.HELIOS_MEDIA_DIR = SMOKE_DIR;
 process.env.HELIOS_DATA_DIR = join(SMOKE_DIR, "data");
 
-// ── Tiny assertion harness ───────────────────────────────────────────────────
-let passed = 0;
-const failures = [];
-
-function ok(name, condition, detail) {
-  if (condition) {
-    passed++;
-    return true;
-  }
-  failures.push(detail ? `${name} — ${detail}` : name);
-  return false;
-}
-
-function eq(name, actual, expected) {
-  const same = Object.is(actual, expected) ||
-    JSON.stringify(actual) === JSON.stringify(expected);
-  return ok(
-    name,
-    same,
-    `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
-  );
-}
-
-function section(title) {
-  console.log(`\n▸ ${title}`);
-}
+// ── Shared harness ───────────────────────────────────────────────────────────
+// Assertions, the fake Response (streaming / splits / SSE replay) and the
+// signal-aware fetch stub live in ./smoke-lib.mjs.
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 // 1×1 PNG — a real (tiny) image, so the staging path exercises real bytes.
@@ -172,39 +165,25 @@ const PNG_BYTES = Buffer.from(
 );
 const REF_URL = "https://example.com/reference-a.png";
 
-/** Minimal `Response`-alike for the stubbed fetch. */
-function fakeResponse(payload, { ok = true, status = 200, bytes = null, contentType = "application/json" } = {}) {
-  const text = typeof payload === "string" ? payload : JSON.stringify(payload);
-  const buf = bytes ?? Buffer.from(text, "utf8");
-  return {
-    ok,
-    status,
-    text: async () => text,
-    arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
-    headers: {
-      get: (name) => (String(name).toLowerCase() === "content-type" ? contentType : "application/json"),
-    },
-  };
-}
-
-const realFetch = globalThis.fetch;
-const capturedCalls = [];
+// ── Stubbed fetch (shared call log, signal-aware) ────────────────────────────
 let stubbedResponse = () => fakeResponse({ data: [] });
-globalThis.fetch = async (url, init) => {
-  capturedCalls.push({ url: String(url), init });
-  return stubbedResponse(url, init);
-};
+const { calls: capturedCalls, restore: restoreFetch } = installFetchStub(
+  (url, init) => stubbedResponse(url, init),
+);
+// The installed stub — a coverage section can put it back after swapping
+// globalThis.fetch without re-installing (which would rebind the call log).
+const installedFetch = globalThis.fetch;
 
-/** Swallow the adapter's request log unless HELIOS_SMOKE_VERBOSE=1. */
-function quiet(fn) {
-  const original = console.log;
-  if (process.env.HELIOS_SMOKE_VERBOSE === "1") return fn();
-  console.log = () => {};
-  try {
-    return fn();
-  } finally {
-    console.log = original;
+/** Drain a ReadableStream body into a utf8 string (harness self-test helper). */
+async function readStreamText(stream) {
+  const reader = stream.getReader();
+  const chunks = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(Buffer.from(value));
   }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function main() {
@@ -231,6 +210,77 @@ async function main() {
     POLLINATIONS_KEY_ENV,
     POLLINATIONS_MEDIA_UPLOAD_URL,
   } = bindingsMod;
+
+  // ── Harness capabilities (infrastructure self-test, NOT provider coverage) ─
+  section("harness capabilities (self-test)");
+  ok(
+    "the shared harness exposes its version",
+    typeof HARNESS_VERSION === "string" && HARNESS_VERSION.length > 0,
+  );
+  eq(
+    "fakeResponse.json() parses the payload",
+    await fakeResponse({ selfTest: true }).json(),
+    { selfTest: true },
+  );
+  const chunkedResponse = fakeResponse("chunked-payload", {
+    chunks: ["chun", "ked-", "payload"],
+  });
+  eq(
+    "body chunks reassemble through getReader()",
+    await readStreamText(chunkedResponse.body),
+    "chunked-payload",
+  );
+  ok("bodyUsed flips once the body is read", chunkedResponse.bodyUsed === true);
+
+  const wireFrames = [
+    { data: { hello: "world" } },
+    { event: "complete", data: null },
+  ];
+  const expectedWire = "event: message\ndata: {\"hello\":\"world\"}\n\nevent: complete\ndata: null\n\n";
+  const splitResponse = sseFrames(wireFrames, { splitEveryNBytes: 7 });
+  eq(
+    "mid-frame SSE splits reassemble to the same bytestring",
+    await readStreamText(splitResponse.body),
+    expectedWire,
+  );
+
+  const earlyAbort = new AbortController();
+  stubbedResponse = () =>
+    fakeResponse("early-abort", { chunks: ["early-", "abort"], chunkDelayMs: 50 });
+  const earlyOutcome = globalThis
+    .fetch("http://self-test/early-abort", { signal: earlyAbort.signal })
+    .then(() => null, (err) => err);
+  setTimeout(() => earlyAbort.abort(), 5);
+  const earlyError = await earlyOutcome;
+  eq(
+    "an aborted-early signal rejects the fetch with AbortError",
+    earlyError?.name,
+    "AbortError",
+  );
+
+  const lateAbort = new AbortController();
+  stubbedResponse = () =>
+    fakeResponse("late-abort", { chunks: ["late-", "abort"], chunkDelayMs: 50 });
+  const streamedResponse = await globalThis.fetch("http://self-test/late-abort", {
+    signal: lateAbort.signal,
+  });
+  const streamedReader = streamedResponse.body.getReader();
+  lateAbort.abort();
+  let abortReadError = null;
+  try {
+    for (;;) {
+      const { done } = await streamedReader.read();
+      if (done) break;
+    }
+  } catch (err) {
+    abortReadError = err;
+  }
+  eq(
+    "the body reader surfaces the abort while in-flight",
+    abortReadError?.name,
+    "AbortError",
+  );
+  stubbedResponse = () => fakeResponse({ data: [] });
 
   // ── 1. Registry ────────────────────────────────────────────────────────────
   section("registry");
@@ -876,10 +926,7 @@ async function main() {
   ok("the HTTP error surfaces", !!httpError);
 
   // Restore the fixture's stub for the (optional) live step.
-  globalThis.fetch = async (url, init) => {
-    capturedCalls.push({ url: String(url), init });
-    return stubbedResponse(url, init);
-  };
+  globalThis.fetch = installedFetch;
 
   // ── 11. The run-log read API ───────────────────────────────────────────────
   section("GET /api/jobs/[taskId]/log");
@@ -1262,7 +1309,7 @@ async function main() {
   } else if (process.env.HELIOS_SMOKE_LIVE !== "1") {
     console.log("  SKIP — OPENROUTER_API_KEY is set; set HELIOS_SMOKE_LIVE=1 to run the live call.");
   } else {
-    globalThis.fetch = realFetch;
+    restoreFetch();
     capturedCalls.length = 0;
     try {
       const liveOutcome = await orProvider.submit({
@@ -1284,7 +1331,7 @@ try {
 } catch (err) {
   failures.push(`fixture crashed: ${err?.stack ?? err?.message ?? String(err)}`);
 } finally {
-  globalThis.fetch = realFetch;
+  restoreFetch();
   await rm(SMOKE_DIR, { recursive: true, force: true });
 }
 

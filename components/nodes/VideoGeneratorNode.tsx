@@ -8,6 +8,7 @@ import { Handle, Position, NodeProps, Node, useUpdateNodeInternals } from "@xyfl
 import CornerResizer from "./CornerResizer";
 import NodeActionBar from "./NodeActionBar";
 import { useWorkflowStore, NodeData } from "@/lib/store";
+import type { CustomModelInfo } from "@/lib/store";
 import { getModelProvider, setModelProvider, modelHasProviderChoice, enabledProvidersForModel, isModelReady, isModelEnabled, defaultModelId, providerMeta } from "@/lib/providers";
 import { ProviderBrandIcon, NodeProviderIcon } from "@/components/ui/ProviderIcon";
 import { resolveInputs } from "@/lib/executor";
@@ -393,6 +394,17 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
     () => VIDEO_MODEL_CFG.filter((m) => isModelEnabled(m.id, disabledModels)),
     [disabledModels],
   );
+  // P7a-1 custom logical models of the video kind — grouped apart from the
+  // shipped catalog (they are user-defined, never presented as built-ins).
+  const customModels = useWorkflowStore((s) => s.customModels);
+  const customVideoModels = useMemo(
+    () => customModels.filter((m) => m.kind === "video" && isModelEnabled(m.id, disabledModels)),
+    [customModels, disabledModels],
+  );
+  // A custom model id is not in the static catalog — show its own label in
+  // the pill, never the first catalog model's name.
+  const customVideoModel: CustomModelInfo | undefined = customModels.find((m) => m.id === videoModelId && m.kind === "video");
+  const pillModelName = customVideoModel?.label ?? cfg.name;
 
   // P5: active provider for this video model (most video models are Kie-only;
   // the pill renders only when the model's binding union has ≥2 entries).
@@ -1845,9 +1857,9 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
                 <div className="relative">
                   <Pill onClick={() => { setModelOpen((o) => !o); setRatioOpen(false); setDurOpen(false); setModeOpen(false); setGrokResOpen(false); }}>
                     <span className="shrink-0 text-white/60" style={{ lineHeight: 0 }}>
-                      <NodeProviderIcon provider={cfg.provider} />
+                      <NodeProviderIcon provider={customVideoModel ? "" : cfg.provider} />
                     </span>
-                    <span className="text-[11px] text-white/70">{cfg.name}</span>
+                    <span className="text-[11px] text-white/70">{pillModelName}</span>
                     <ChevronIcon open={modelOpen} />
                   </Pill>
                   <FloatMenu open={modelOpen}>
@@ -1898,6 +1910,46 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
                         ))}
                       </Fragment>
                     ))}
+                    {customVideoModels.length > 0 && (
+                      <Fragment>
+                        <div style={{ height: "1px", background: "rgba(255,255,255,0.06)", margin: "4px 8px" }} />
+                        <div style={{ padding: "5px 10px 3px", fontSize: "10px", color: "rgba(255,255,255,0.22)", textTransform: "uppercase", letterSpacing: "0.09em", fontWeight: 500 }}>
+                          Custom models
+                        </div>
+                        {customVideoModels.map((m) => {
+                          // A custom model with no bound backend must not look
+                          // usable: it renders disabled with an inline hint
+                          // rather than selectable-then-failing.
+                          const backend = getModelProvider(m.id);
+                          const unbound = !backend;
+                          return (
+                            <button
+                              key={m.id}
+                              disabled={unbound}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={() => {
+                                updateNodeData(id, { videoModel: m.id });
+                                setModelOpen(false);
+                              }}
+                              title={unbound ? "No backend is bound to this model" : undefined}
+                              className={`w-full flex items-center gap-2 px-3 py-2 text-[11px] transition-colors ${unbound ? "cursor-default opacity-50" : "hover:bg-[#141C28]"} ${videoModelId === m.id ? "text-white font-medium" : "text-[#A0A0A0]"}`}
+                            >
+                              <span className="shrink-0 text-white/50" style={{ lineHeight: 0 }}>
+                                {backend ? (
+                                  <ProviderBrandIcon id={backend} size={11} />
+                                ) : (
+                                  <NodeProviderIcon provider="" />
+                                )}
+                              </span>
+                              <span className="flex-1 text-left whitespace-nowrap">{m.label}</span>
+                              {unbound && (
+                                <span className="text-[10px] text-white/25">no backend</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </Fragment>
+                    )}
                   </FloatMenu>
                 </div>
 

@@ -452,6 +452,12 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
     () => MODELS.filter((m) => isModelEnabled(m.id, disabledModels)),
     [disabledModels],
   );
+  // P7a-1 custom logical models of the image kind — grouped apart from the
+  // shipped catalog (they are user-defined, never presented as built-ins).
+  const customImageModels = useMemo(
+    () => customModels.filter((m) => m.kind === "image" && isModelEnabled(m.id, disabledModels)),
+    [customModels, disabledModels],
+  );
 
   // The model's fallback default skips hidden models (declutter).
   const model = (data.model as string) ?? defaultModelId(IMAGE_MODELS, "nano-banana-2", disabledModels);
@@ -1263,6 +1269,50 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
                     ))}
                   </Fragment>
                 ))}
+                {customImageModels.length > 0 && (
+                  <Fragment>
+                    <div className="border-t border-white/[0.06] mx-2 my-0.5" />
+                    <div className="px-3 pt-1.5 pb-0.5 text-[10px] uppercase tracking-[0.08em] text-white/25">
+                      Custom models
+                    </div>
+                    {customImageModels.map((m) => {
+                      // A custom model with no bound backend must not look
+                      // usable: it renders disabled with an inline hint rather
+                      // than selectable-then-failing.
+                      const backend = getModelProvider(m.id);
+                      const unbound = !backend;
+                      return (
+                        <button
+                          key={m.id}
+                          disabled={unbound}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={() => {
+                            const newCaps = capsForModel(m.id, customModels);
+                            const validRatio = newCaps.ratios.includes(aspectRatio) ? aspectRatio : "1:1";
+                            const validQuality = newCaps.qualityOptions && !newCaps.qualityOptions.includes(quality as "1k" | "2k" | "4k")
+                              ? newCaps.qualityOptions[0]
+                              : quality;
+                            updateNodeData(id, { model: m.id, aspectRatio: validRatio, quality: validQuality });
+                            if (!newCaps.supportsImages) removeEdgesForHandle(id, "image");
+                            setModelOpen(false);
+                          }}
+                          title={unbound ? "No backend is bound to this model" : undefined}
+                          className={`w-full flex items-center gap-2 px-3 py-[7px] text-[11px] transition-colors ${unbound ? "cursor-default opacity-50" : "hover:bg-[#141C28]"} ${model === m.id ? "text-white" : "text-[#A0A0A0]"}`}
+                        >
+                          <span className="shrink-0 text-white/50" style={{ lineHeight: 0 }}>
+                            {backend ? (
+                              <ProviderBrandIcon id={backend} size={11} />
+                            ) : (
+                              <NodeProviderIcon provider="" />
+                            )}
+                          </span>
+                          <span className="flex-1 text-left">{m.label}</span>
+                          <span className="text-[#4A4A45]">{unbound ? "no backend" : providerMeta(backend).label}</span>
+                        </button>
+                      );
+                    })}
+                  </Fragment>
+                )}
               </div>
             )}
           </div>

@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, Suspense } fr
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
 import { IMAGE_MODELS, VIDEO_MODELS, AZURE_POPULAR_SIZES, validateAzureCustomSize } from "@/lib/modelConfig";
-import { PROVIDERS, getModelProvider, setModelProvider, modelHasProviderChoice, isAzureConfiguredForModel, isModelReady, enabledProvidersForModel, isModelEnabled } from "@/lib/providers";
+import { PROVIDERS, getModelProvider, setModelProvider, modelHasProviderChoice, isAzureConfiguredForModel, isModelReady, enabledProvidersForModel, isModelEnabled, providerMeta } from "@/lib/providers";
 import { ProviderBrandIcon, NodeProviderIcon } from "@/components/ui/ProviderIcon";
 import { useWorkflowStore } from "@/lib/store";
 import { Maximize2, Minimize2, ShieldAlert, X } from "lucide-react";
@@ -666,6 +666,34 @@ function GalleryInner() {
     () => models.filter((m) => isModelEnabled(m.id, disabledModels)),
     [models, disabledModels],
   );
+  // P7a-1 custom logical models of the composer's kind — grouped apart from
+  // the shipped catalog in the picker (user-defined, never built-ins).
+  const customModels = useWorkflowStore((s) => s.customModels);
+  const customKind = isVideo ? "video" : "image";
+  const customEntries = useMemo(
+    () =>
+      customModels
+        .filter((m) => m.kind === customKind && isModelEnabled(m.id, disabledModels))
+        .map((m) => {
+          const backend = getModelProvider(m.id);
+          return {
+            id: m.id,
+            label: m.label,
+            // A custom model with no bound backend renders disabled with an
+            // inline hint rather than selectable-then-failing.
+            disabled: !backend,
+            backendId: backend,
+            backendLabel: backend ? providerMeta(backend).label : "",
+            ratios: m.ratios.length > 0 ? m.ratios : ["1:1"],
+            supportsImages: m.supportsImages,
+            maxImages: m.maxImages,
+            supportsQuality: m.supportsQuality,
+            promptMaxLength: m.apiInput.promptMaxLength,
+            qualityOptions: m.apiInput.qualityOptions ?? [],
+          };
+        }),
+    [customModels, customKind, disabledModels],
+  );
   /** The model the composer falls back to when nothing (valid) is selected. */
   const fallbackModelId = visibleModels[0]?.id ?? models[0].id;
 
@@ -676,8 +704,14 @@ function GalleryInner() {
   const settingsSnapshotRef = useRef<SavedSettings | null>(null);
   const [modelId, setModelId] = useState<string>(() => {
     const s = loadSettings(tab, selectedFolderId);
-    return (s?.modelId && models.find(m => m.id === s.modelId)) ? s.modelId : fallbackModelId;
+    // The saved id is kept verbatim (it may name a custom model the bootstrap
+    // has not reported yet) — the validation effect below falls back once the
+    // bootstrap has landed.
+    return s?.modelId ?? fallbackModelId;
   });
+
+  /** The active custom model, if the composer is on one. */
+  const customActive = customEntries.find((m) => m.id === modelId);
   const [aspectRatio, setAspectRatio] = useState<string>(() => {
     const s = loadSettings(tab, selectedFolderId);
     const mId = (s?.modelId && models.find(m => m.id === s.modelId)) ? s.modelId : fallbackModelId;
@@ -1121,9 +1155,15 @@ function GalleryInner() {
     const saved = loadSettings(tab, prevFolderIdRef.current);
     const savedModel = saved?.modelId ? newModels.find(m => m.id === saved.modelId) : null;
     // A hidden model is never restored — fall back to the first enabled one.
+    // A saved custom-model id is restored when the bootstrap still reports it.
+    const savedCustomTab = !savedModel && saved?.modelId
+      ? customModels.find((m) => m.id === saved.modelId && m.kind === (tab === "videos" ? "video" : "image"))
+      : undefined;
     const model = (savedModel && isModelEnabled(savedModel.id, disabledModels))
       ? savedModel
-      : (newModels.find(m => isModelEnabled(m.id, disabledModels)) ?? newModels[0]);
+      : (savedCustomTab && isModelEnabled(savedCustomTab.id, disabledModels))
+        ? savedCustomTab
+        : (newModels.find(m => isModelEnabled(m.id, disabledModels)) ?? newModels[0]);
     const azureOpts = (model as { azureResolutionOptions?: string[] }).azureResolutionOptions;
     const savedIsCustom = saved?.aspectRatio === "custom" && Number.isFinite(saved.azureCustomWidth) && Number.isFinite(saved.azureCustomHeight) && isAzureActiveForModel(model.id, azureOpts);
     const savedAR = savedIsCustom ? "custom" : (saved?.aspectRatio && model.ratios.includes(saved.aspectRatio) ? saved.aspectRatio : null);
@@ -1231,12 +1271,29 @@ function GalleryInner() {
   }, [modelId, isVideo, modelProviders, providerStatus]);
 
   // A model hidden in Settings must never stay the composer's active model —
-  // fall back to the first enabled one.
+  // fall back to the first enabled one. A custom model id is kept as long as
+  // the bootstrap still reports it; an unknown id waits for hydration (it may
+  // be a custom model not reported yet) before falling back.
   useEffect(() => {
     if (visibleModels.some((m) => m.id === modelId)) return;
+    if (customEntries.some((m) => m.id === modelId)) return;
+    if (!providersHydrated && !models.some((m) => m.id === modelId)) return;
     const next = visibleModels[0]?.id;
     if (next && next !== modelId) setModelId(next);
-  }, [modelId, visibleModels]);
+  }, [modelId, visibleModels, customEntries, models, providersHydrated]);
+
+  // A custom model reports its own ratios/quality options — clamp the composer
+  // state into them once the bootstrap names the active model.
+  useEffect(() => {
+    if (!customActive) return;
+    if (customActive.ratios.length > 0 && !customActive.ratios.includes(aspectRatio)) {
+      setAspectRatio(customActive.ratios[0]);
+    }
+    if (customActive.supportsQuality && customActive.qualityOptions.length > 0 && !customActive.qualityOptions.includes(quality)) {
+      setQuality(customActive.qualityOptions[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelId, customModels]);
 
   // Keep refs in sync so the observer callback can gate without needing to be recreated
   useEffect(() => { loadingRef.current = loading; }, [loading]);
@@ -1311,9 +1368,15 @@ function GalleryInner() {
     const newModels = tab === "videos" ? VIDEO_MODELS : IMAGE_MODELS;
     const savedModel = saved?.modelId ? newModels.find(m => m.id === saved.modelId) : null;
     // A hidden model is never restored — fall back to the first enabled one.
+    // A saved custom-model id is restored when the bootstrap still reports it.
+    const savedCustomFolder = !savedModel && saved?.modelId
+      ? customModels.find((m) => m.id === saved.modelId && m.kind === (tab === "videos" ? "video" : "image"))
+      : undefined;
     const model = (savedModel && isModelEnabled(savedModel.id, disabledModels))
       ? savedModel
-      : (newModels.find(m => isModelEnabled(m.id, disabledModels)) ?? newModels[0]);
+      : (savedCustomFolder && isModelEnabled(savedCustomFolder.id, disabledModels))
+        ? savedCustomFolder
+        : (newModels.find(m => isModelEnabled(m.id, disabledModels)) ?? newModels[0]);
     const azureOpts = (model as { azureResolutionOptions?: string[] }).azureResolutionOptions;
     const savedIsCustom = saved?.aspectRatio === "custom" && Number.isFinite(saved.azureCustomWidth) && Number.isFinite(saved.azureCustomHeight) && isAzureActiveForModel(model.id, azureOpts);
     const savedAR = savedIsCustom ? "custom" : (saved?.aspectRatio && model.ratios.includes(saved.aspectRatio) ? saved.aspectRatio : null);
@@ -1401,14 +1464,14 @@ function GalleryInner() {
   // ── Image upload ──────────────────────────────────────────────────────────
 
   const imgModel = IMAGE_MODELS.find(m => m.id === modelId);
-  const maxImgs = imgModel?.maxImages ?? 0;
-  const canAddImgs = !isVideo && !!imgModel?.supportsImages && refImages.length < maxImgs;
+  const maxImgs = imgModel?.maxImages ?? customActive?.maxImages ?? 0;
+  const canAddImgs = !isVideo && (imgModel?.supportsImages ?? customActive?.supportsImages ?? false) && refImages.length < maxImgs;
   const promptMaxLength = (() => {
     if (isVideo) {
       const vm = VIDEO_MODELS.find(m => m.id === modelId);
-      return vm?.apiInput.promptMaxLength ?? null;
+      return vm?.apiInput.promptMaxLength ?? customActive?.promptMaxLength ?? null;
     }
-    if (!imgModel) return null;
+    if (!imgModel) return customActive?.promptMaxLength ?? null;
     const hasRefImgs = refImages.length > 0;
     if (!hasRefImgs && imgModel.textOnlyPromptMaxLength) return imgModel.textOnlyPromptMaxLength;
     return imgModel.apiInput.promptMaxLength;
@@ -1416,7 +1479,7 @@ function GalleryInner() {
   const promptOverLimit = promptMaxLength !== null && prompt.length > promptMaxLength;
 
   const handleFilePick = async (files: FileList) => {
-    if (!imgModel?.supportsImages) return;
+    if (!(imgModel?.supportsImages ?? customActive?.supportsImages)) return;
     const remaining = maxImgs - refImages.length;
     const toAdd = Array.from(files).slice(0, remaining).filter(f => f.type.startsWith("image/"));
     if (toAdd.length === 0) return;
@@ -2203,12 +2266,12 @@ function GalleryInner() {
   // ── Derived ───────────────────────────────────────────────────────────────
 
   const vidModel = VIDEO_MODELS.find(m => m.id === modelId);
-  const ratios = (isVideo ? vidModel?.ratios : imgModel?.ratios) ?? [];
-  const supportsQ = !isVideo && !!imgModel?.supportsQuality;
+  const ratios = (isVideo ? vidModel?.ratios : imgModel?.ratios) ?? customActive?.ratios ?? [];
+  const supportsQ = !isVideo && (!!imgModel?.supportsQuality || !!customActive?.supportsQuality);
 
   const qualityOpts: string[] = isAzureProvider
     ? (imgModel!.azureQualityOptions ?? [])
-    : (imgModel?.apiInput.qualityOptions ?? ["2k", "4k"]);
+    : (imgModel?.apiInput.qualityOptions ?? customActive?.qualityOptions ?? ["2k", "4k"]);
   const azureResolutionOpts: string[] = isAzureProvider ? (imgModel?.azureResolutionOptions ?? []) : [];
   const durations = vidModel?.durations ?? [];
   const vidModes = vidModel?.modes ?? [];
@@ -4059,12 +4122,22 @@ function GalleryInner() {
                   value={modelId}
                   onChange={setModelId}
                   disabled={submitting}
-                  options={visibleModels.map(m => ({
-                    value: m.id,
-                    label: m.name,
-                    group: ("provider" in m ? (m as { provider: string }).provider : undefined),
-                    providerIcon: "provider" in m ? <NodeProviderIcon provider={(m as { provider: string }).provider} size={16} className="" /> : undefined,
-                  }))}
+                  options={[
+                    ...visibleModels.map(m => ({
+                      value: m.id,
+                      label: m.name,
+                      group: ("provider" in m ? (m as { provider: string }).provider : undefined),
+                      providerIcon: "provider" in m ? <NodeProviderIcon provider={(m as { provider: string }).provider} size={16} className="" /> : undefined,
+                    })),
+                    ...customEntries.map(m => ({
+                      value: m.id,
+                      label: m.label,
+                      group: "Custom models",
+                      providerIcon: m.backendId ? <ProviderBrandIcon id={m.backendId} size={16} /> : undefined,
+                      disabled: m.disabled,
+                      hint: m.disabled ? "no backend" : m.backendLabel,
+                    })),
+                  ]}
                   showChevron
                 />
 
@@ -4075,7 +4148,10 @@ function GalleryInner() {
                     onChange={(v) => setModelProvider(modelId, v as (typeof PROVIDERS)[number]["id"])}
                     disabled={submitting}
                     options={galleryProviderChoices.flatMap((id) => {
-                      const p = PROVIDERS.find((q) => q.id === id);
+                      // The server union may name a user-created backend the
+                      // static PROVIDERS list does not know — its label comes
+                      // from the bootstrap report (providerMeta).
+                      const p = providerMeta(id);
                       return p ? [{ value: p.id, label: p.label, providerIcon: <ProviderBrandIcon id={p.id} size={14} /> }] : [];
                     })}
                     showChevron
@@ -4800,6 +4876,9 @@ interface DropOption {
   group?: string;
   preview?: React.ReactNode;
   providerIcon?: React.ReactNode;
+  /** An unbound custom model renders disabled with an inline hint. */
+  disabled?: boolean;
+  hint?: string;
 }
 
 // ── Element picker modal ─────────────────────────────────────────────────────
@@ -5265,7 +5344,9 @@ function CustomDropdown({
                       key={opt.value}
                       label={opt.label}
                       active={opt.value === value}
-                      onClick={() => { onChange(opt.value); setOpen(false); }}
+                      disabled={opt.disabled}
+                      hint={opt.hint}
+                      onClick={() => { if (!opt.disabled) { onChange(opt.value); setOpen(false); } }}
                       preview={opt.preview}
                       providerIcon={opt.providerIcon}
                     />
@@ -5278,7 +5359,9 @@ function CustomDropdown({
                   key={opt.value}
                   label={opt.label}
                   active={opt.value === value}
-                  onClick={() => { onChange(opt.value); setOpen(false); }}
+                  disabled={opt.disabled}
+                  hint={opt.hint}
+                  onClick={() => { if (!opt.disabled) { onChange(opt.value); setOpen(false); } }}
                   preview={opt.preview}
                   providerIcon={opt.providerIcon}
                 />
@@ -5546,11 +5629,13 @@ function AspectRatioDropdown({
   );
 }
 
-function DropItem({ label, active, onClick, preview, providerIcon }: { label: string; active: boolean; onClick: () => void; preview?: React.ReactNode; providerIcon?: React.ReactNode }) {
+function DropItem({ label, active, onClick, preview, providerIcon, disabled, hint }: { label: string; active: boolean; onClick: () => void; preview?: React.ReactNode; providerIcon?: React.ReactNode; disabled?: boolean; hint?: string }) {
   const [hovered, setHovered] = useState(false);
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
+      title={disabled ? "No backend is bound to this model" : undefined}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -5563,16 +5648,19 @@ function DropItem({ label, active, onClick, preview, providerIcon }: { label: st
         border: "none",
         background: active
           ? "rgba(255,255,255,0.09)"
-          : hovered ? "rgba(255,255,255,0.06)" : "transparent",
-        color: active ? "#ffffff" : hovered ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.55)",
+          : hovered && !disabled ? "rgba(255,255,255,0.06)" : "transparent",
+        color: disabled
+          ? "rgba(255,255,255,0.35)"
+          : active ? "#ffffff" : hovered ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.55)",
         fontSize: "13px",
         fontWeight: active ? 500 : 400,
-        cursor: "pointer",
+        cursor: disabled ? "default" : "pointer",
         textAlign: "left",
         transition: "background 100ms, color 100ms",
         fontFamily: "inherit",
         letterSpacing: "-0.01em",
         whiteSpace: "nowrap",
+        opacity: disabled ? 0.6 : 1,
       }}
     >
       {providerIcon && (
@@ -5582,6 +5670,11 @@ function DropItem({ label, active, onClick, preview, providerIcon }: { label: st
       )}
       {preview}
       {label}
+      {hint && (
+        <span style={{ marginLeft: "auto", fontSize: "11px", color: "rgba(255,255,255,0.3)", flexShrink: 0 }}>
+          {hint}
+        </span>
+      )}
     </button>
   );
 }

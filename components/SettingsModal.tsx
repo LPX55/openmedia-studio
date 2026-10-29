@@ -523,6 +523,16 @@ const COMPAT_ENDPOINTS: {
   },
 ];
 
+/**
+ * Readable family name for a backend kind token. The report carries the raw
+ * `kind` (`openai-compat` | `gradio` | `mcp`); the UI never shows the token.
+ */
+function familyLabel(kind: string): string {
+  if (kind === "gradio" || kind === "hf-gradio") return "HF Space";
+  if (kind === "mcp") return "MCP server";
+  return "OpenAI-compatible";
+}
+
 function CompatEndpointCard({
   id,
   label,
@@ -839,6 +849,201 @@ function CompatEndpointCard({
   );
 }
 
+/* ─── Add-backend card (user-created backends) ─────────────────────────────── */
+
+/**
+ * Compact "Add backend" form inside the Custom endpoints section — one card,
+ * same treatment as the endpoint cards. Creates a backend row via
+ * PUT /api/settings/providers (`providerId` + `kind`, optional base URL, token
+ * and label) and refetches the bootstrap. Custom-model creation stays
+ * API-driven; this form only adds backends.
+ */
+function AddBackendCard() {
+  const [id, setId]             = useState("");
+  const [kind, setKind]         = useState("openai-compat");
+  const [baseUrl, setBaseUrl]   = useState("");
+  const [apiKey, setApiKey]     = useState("");
+  const [label, setLabel]       = useState("");
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState<string | null>(null);
+
+  const handleAdd = async () => {
+    const pid = id.trim();
+    if (!pid) {
+      setError("Enter an id for the backend.");
+      return;
+    }
+    if (!kind) {
+      setError("Choose a family for the backend.");
+      return;
+    }
+    const url = baseUrl.trim();
+    // HF Spaces and MCP servers are remote HTTP services — a bare hostname
+    // would fail later at request time, so require the scheme up front.
+    if ((kind === "gradio" || kind === "mcp") && url && !/^https?:\/\//i.test(url)) {
+      setError("Base URL must start with http:// or https://.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/settings/providers", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          providerId: pid,
+          kind,
+          ...(url ? { baseUrl: url } : {}),
+          ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+          ...(label.trim() ? { label: label.trim() } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(d.error ?? "Failed to save");
+      }
+      await refreshProviderBootstrap();
+      setId("");
+      setBaseUrl("");
+      setApiKey("");
+      setLabel("");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "10px",
+        padding: "16px",
+        background: "rgba(255,255,255,0.02)",
+        border: "1px dashed rgba(255,255,255,0.14)",
+        borderRadius: "12px",
+      }}
+    >
+      <div style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.85)" }}>
+        Add backend
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+        <label
+          htmlFor="add-backend-id"
+          style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
+        >
+          Id
+        </label>
+        <input
+          id="add-backend-id"
+          type="text"
+          placeholder="e.g. my-space"
+          value={id}
+          onChange={(e) => setId(e.target.value)}
+          style={INPUT_STYLE}
+          onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"; }}
+          onBlur={(e)  => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
+        />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+        <label
+          htmlFor="add-backend-kind"
+          style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
+        >
+          Family
+        </label>
+        <select
+          id="add-backend-kind"
+          value={kind}
+          onChange={(e) => setKind(e.target.value)}
+          style={INPUT_STYLE}
+        >
+          <option value="openai-compat">OpenAI-compatible</option>
+          <option value="gradio">HF Space</option>
+          <option value="mcp">MCP server</option>
+        </select>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+        <label
+          htmlFor="add-backend-base-url"
+          style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
+        >
+          Base URL
+        </label>
+        <input
+          id="add-backend-base-url"
+          type="url"
+          placeholder="https://your-backend.example.com"
+          value={baseUrl}
+          onChange={(e) => setBaseUrl(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") void handleAdd(); }}
+          style={INPUT_STYLE}
+          onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"; }}
+          onBlur={(e)  => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
+        />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+        <label
+          htmlFor="add-backend-key"
+          style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
+        >
+          Token <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>(optional)</span>
+        </label>
+        <input
+          id="add-backend-key"
+          type="password"
+          placeholder="Paste a token if the backend needs one"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") void handleAdd(); }}
+          style={INPUT_STYLE}
+          onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"; }}
+          onBlur={(e)  => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
+        />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+        <label
+          htmlFor="add-backend-label"
+          style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em", textTransform: "uppercase" }}
+        >
+          Label <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>(optional)</span>
+        </label>
+        <input
+          id="add-backend-label"
+          type="text"
+          placeholder="Shown in the pickers"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") void handleAdd(); }}
+          style={INPUT_STYLE}
+          onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"; }}
+          onBlur={(e)  => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
+        />
+      </div>
+      <div>
+        <button
+          onClick={handleAdd}
+          disabled={saving || !id.trim() || !kind}
+          style={{
+            padding: "7px 14px", borderRadius: "7px", border: "none",
+            background: id.trim() && kind ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
+            color: id.trim() && kind ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.25)",
+            cursor: id.trim() && kind ? "pointer" : "default",
+            fontSize: "12px", fontWeight: 500, whiteSpace: "nowrap",
+          }}
+        >
+          {saving ? "Adding…" : "Add backend"}
+        </button>
+      </div>
+      {error && (
+        <p style={{ fontSize: "11px", color: "rgba(239,68,68,0.7)", margin: 0 }}>{error}</p>
+      )}
+    </div>
+  );
+}
+
 /* ─── API Keys panel ─────────────────────────────────────────────────────────── */
 
 const INPUT_STYLE: React.CSSProperties = {
@@ -901,7 +1106,7 @@ function ApiKeysPanel({
     .map(([id, p]) => ({
       id,
       label: p.label.trim() || id,
-      hint: `User-created ${p.kind} backend.`,
+      hint: `User-created ${familyLabel(p.kind as string).toLowerCase()} backend.`,
       baseUrlPinned: false,
       kind: p.kind as string,
     }));
@@ -1273,6 +1478,7 @@ function ApiKeysPanel({
             kind={ep.kind}
           />
         ))}
+        <AddBackendCard />
       </div>
 
       {/* ──── Codex CLI status ─────────────────────────────────────────── */}

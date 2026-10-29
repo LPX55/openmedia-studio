@@ -195,8 +195,8 @@ async function main() {
     "remote-url/remote-url",
   );
   ok(
-    "the seeded gradio family counts exactly 2 bindings",
-    BUILT_IN_BINDINGS.filter((b) => b.providerId === "hf-gradio").length === 2,
+    "the seeded gradio family counts exactly 4 bindings",
+    BUILT_IN_BINDINGS.filter((b) => b.providerId === "hf-gradio").length === 4,
   );
 
   // ── 2. ARGMAP vs the RECORDED positional order ─────────────────────────────
@@ -821,6 +821,230 @@ async function main() {
   );
   eq("a Space base URL with NO key is still ready (public Space)", withBase.ready, true);
   eq("the readiness carries no reason for a ready Space", withBase.reason ?? null, null);
+
+  // ── 14. OPERATOR-SUPPLIED SPACES (P7b addendum) ────────────────────────────
+  // Two verified Spaces beyond the original pair. The recorded /info bodies are
+  // byte-exact captures; the argMap must reproduce the AUTHORITATIVE positional
+  // order — including ref2va's `variant` sitting BETWEEN reference_2 and
+  // reference_3 (a contiguous-refs assumption corrupts the wire).
+  section("operator Spaces — moss-image-8-step-dmd + smd-minimax-h3-ref2va-few-step");
+  const MOSS_INFO_FIXTURE = join(ROOT, "docs", "fixtures", "phase7", "moss-image-8-step-dmd-info.json");
+  const REF2VA_INFO_FIXTURE = join(ROOT, "docs", "fixtures", "phase7", "smd-minimax-h3-ref2va-few-step-info.json");
+  const MOSS_BASE = "https://hugging-apps-moss-image-8-step-dmd.hf.space";
+  const REF2VA_BASE = "https://hugging-apps-smd-minimax-h3-ref2va-few-step.hf.space";
+
+  const mossResolved = resolveForModel("moss-image-8-step-dmd", "hf-gradio", []);
+  eq(
+    "the moss Space binding resolves to /generate @ its own origin",
+    `${mossResolved.binding.upstreamModelId} @ ${mossResolved.binding.baseUrl}`,
+    `/generate @ ${MOSS_BASE}`,
+  );
+  const ref2vaResolved = resolveForModel("smd-minimax-h3-ref2va-few-step", "hf-gradio", []);
+  eq(
+    "the ref2va Space binding resolves to /generate @ its own origin",
+    `${ref2vaResolved.binding.upstreamModelId} @ ${ref2vaResolved.binding.baseUrl}`,
+    `/generate @ ${REF2VA_BASE}`,
+  );
+  eq(
+    "both operator Space bindings stage media as remote-url with the HF token",
+    `${mossResolved.binding.mediaStaging}/${mossResolved.binding.keyEnv}/${ref2vaResolved.binding.mediaStaging}/${ref2vaResolved.binding.keyEnv}`,
+    "remote-url/HF_TOKEN/remote-url/HF_TOKEN",
+  );
+
+  const mossInfo = JSON.parse(await readFile(MOSS_INFO_FIXTURE, "utf8"));
+  const mossParams = mossInfo.named_endpoints["/generate"].parameters;
+  const ref2vaInfo = JSON.parse(await readFile(REF2VA_INFO_FIXTURE, "utf8"));
+  const ref2vaParams = ref2vaInfo.named_endpoints["/generate"].parameters;
+
+  /** The argMap's mapped indices, ascending — the data[] order it builds. */
+  const mappedIndices = (argMap) =>
+    [...new Set([
+      ...Object.keys(argMap.sources ?? {}),
+      ...Object.keys(argMap.constants ?? {}),
+      ...(argMap.fileInputs ?? []),
+    ])].map(Number).sort((a, b) => a - b);
+
+  eq("the recorded moss signature declares 7 data slots", mossParams.length, 7);
+  eq(
+    "the recorded moss order matches the argMap's mapped slot order",
+    mappedIndices(mossResolved.binding.argMap).map((i) => mossParams[i]?.parameter_name).join(","),
+    "prompt,height,width,num_steps,seed,randomize_seed,lora_strength",
+  );
+  eq(
+    "the recorded ref2va signature declares 9 data slots",
+    ref2vaParams.length,
+    9,
+  );
+  eq(
+    "the recorded ref2va order matches the argMap's mapped slot order",
+    mappedIndices(ref2vaResolved.binding.argMap).map((i) => ref2vaParams[i]?.parameter_name).join(","),
+    "prompt,reference_1,reference_2,variant,reference_3,canvas,duration,seed,randomize_seed",
+  );
+  eq(
+    "the ref2va variant slot sits BETWEEN reference_2 and reference_3",
+    `${ref2vaParams[2]?.parameter_name},${ref2vaParams[3]?.parameter_name},${ref2vaParams[4]?.parameter_name}`,
+    "reference_2,variant,reference_3",
+  );
+  eq(
+    "the moss argMap pins prompt→0, seed→4 and the recorded defaults",
+    `${mossResolved.binding.argMap.sources["0"]},${mossResolved.binding.argMap.sources["4"]}/${mossResolved.binding.argMap.constants["1"]}/${mossResolved.binding.argMap.constants["2"]}/${mossResolved.binding.argMap.constants["3"]}/${mossResolved.binding.argMap.constants["5"]}/${mossResolved.binding.argMap.constants["6"]}`,
+    "prompt,seed/1024/1024/8/true/0.7",
+  );
+  eq(
+    "the ref2va argMap keeps refs at 1,2,4 and variant/canvas/duration/flags at 3,5,6,8",
+    `${ref2vaResolved.binding.argMap.fileInputs.join(",")}|${ref2vaResolved.binding.argMap.constants["3"]}|${ref2vaResolved.binding.argMap.constants["5"]}|${ref2vaResolved.binding.argMap.constants["6"]}|${ref2vaResolved.binding.argMap.constants["8"]}`,
+    "1,2,4|4-step|1344x768 · 16:9 (trained)|5|false",
+  );
+
+  // Moss submit — the exact 7-slot positional array (text-to-image, no files).
+  const mossModel = { id: "moss-image-8-step-dmd", apiId: "moss-image-8-step-dmd", apiInput: {} };
+  stubbedResponse = (url, init) => {
+    if (url === `${MOSS_BASE}/gradio_api/call/generate` && init?.method === "POST") {
+      return fakeResponse({ event_id: "evt-moss-1" });
+    }
+    return fakeResponse({}, { status: 404, ok: false });
+  };
+  capturedCalls.length = 0;
+  const mossSubmitted = await gradioProvider.submit({
+    taskId: "smoke-gradio-task",
+    kind: "image",
+    model: mossModel,
+    binding: mossResolved.binding,
+    prompt: "a lighthouse in a storm",
+    params: { seed: 1234 },
+    media: {},
+    credentials,
+  });
+  const mossCall = capturedCalls.find((c) => c.url === `${MOSS_BASE}/gradio_api/call/generate`);
+  eq(
+    "the moss data[] is the exact 7-slot positional array",
+    mossCall?.init?.body ? JSON.stringify(JSON.parse(mossCall.init.body)) : null,
+    JSON.stringify({ data: ["a lighthouse in a storm", 1024, 1024, 8, 1234, true, 0.7] }),
+  );
+  eq(
+    "the moss submit resolves async with its own event id",
+    mossSubmitted.mode + ":" + mossSubmitted.upstreamTaskId,
+    "async:evt-moss-1",
+  );
+  // No numeric seed ⇒ the slot stays a literal null; the array never shrinks.
+  capturedCalls.length = 0;
+  await gradioProvider.submit({
+    taskId: "smoke-gradio-task",
+    kind: "image",
+    model: mossModel,
+    binding: mossResolved.binding,
+    prompt: "a lighthouse in a storm",
+    params: {},
+    media: {},
+    credentials,
+  });
+  const mossNoSeedCall = capturedCalls.find((c) => c.url === `${MOSS_BASE}/gradio_api/call/generate`);
+  eq(
+    "an unresolved moss slot rides as a literal null (shape never shrinks)",
+    mossNoSeedCall?.init?.body ? JSON.stringify(JSON.parse(mossNoSeedCall.init.body)) : null,
+    JSON.stringify({ data: ["a lighthouse in a storm", 1024, 1024, 8, null, true, 0.7] }),
+  );
+
+  // Ref2va submit — three refs land at 1,2,4 with FileData dicts, `variant` at 3.
+  const ref2vaModel = {
+    id: "smd-minimax-h3-ref2va-few-step",
+    apiId: "smd-minimax-h3-ref2va-few-step",
+    apiInput: {},
+  };
+  const refStaged = (name, url) => ({
+    originalUrl: `/generated/${name}`,
+    kind: "image",
+    strategy: "remote-url",
+    url: url ?? `/tmp/gradio/b183f4/${name}`,
+    filePath: join(SMOKE_DIR, name),
+    mimeType: "image/png",
+  });
+  stubbedResponse = (url, init) => {
+    if (url === `${REF2VA_BASE}/gradio_api/call/generate` && init?.method === "POST") {
+      return fakeResponse({ event_id: "evt-ref2va-1" });
+    }
+    return fakeResponse({}, { status: 404, ok: false });
+  };
+  capturedCalls.length = 0;
+  const ref2vaSubmitted = await gradioProvider.submit({
+    taskId: "smoke-gradio-task",
+    kind: "video",
+    model: ref2vaModel,
+    binding: ref2vaResolved.binding,
+    prompt: "the sea breathes",
+    params: { seed: 7, aspectRatio: "9:16" },
+    media: {
+      references: [
+        refStaged("ref-1.png"),
+        refStaged("ref-2.png", "https://pics.example/ref-2.png"),
+        refStaged("ref-3.png"),
+      ],
+    },
+    credentials,
+  });
+  const ref2vaCall = capturedCalls.find((c) => c.url === `${REF2VA_BASE}/gradio_api/call/generate`);
+  const ref2vaData = ref2vaCall?.init?.body ? JSON.parse(ref2vaCall.init.body).data : null;
+  eq(
+    "the ref2va data[] keeps variant at 3 and the three FileData refs at 1,2,4",
+    JSON.stringify(ref2vaData),
+    JSON.stringify([
+      "the sea breathes",
+      fileData("/tmp/gradio/b183f4/ref-1.png"),
+      fileData("https://pics.example/ref-2.png"),
+      "4-step",
+      fileData("/tmp/gradio/b183f4/ref-3.png"),
+      "1344x768 · 16:9 (trained)",
+      5,
+      7,
+      false,
+    ]),
+  );
+  eq(
+    "the ref2va submit resolves async with its own event id",
+    ref2vaSubmitted.mode + ":" + ref2vaSubmitted.upstreamTaskId,
+    "async:evt-ref2va-1",
+  );
+  // RECORDED LIMITATION: GradioArgMap has no valueMap, so the requested 9:16
+  // ratio cannot reach the canvas Literal — the constant default rides instead.
+  // This assertion pins today's behavior; it must change when valueMap lands.
+  eq(
+    "the ref2va canvas stays the constant default (ratio→canvas needs a valueMap)",
+    ref2vaData?.[5],
+    "1344x768 · 16:9 (trained)",
+  );
+  // Only one reference supplied ⇒ slots 2 and 4 are literal nulls; the array
+  // keeps its 9 slots (positional shape is authoritative, never compacted).
+  capturedCalls.length = 0;
+  await gradioProvider.submit({
+    taskId: "smoke-gradio-task",
+    kind: "video",
+    model: ref2vaModel,
+    binding: ref2vaResolved.binding,
+    prompt: "the sea breathes",
+    params: { seed: 7 },
+    media: { references: [refStaged("ref-1.png")] },
+    credentials,
+  });
+  const ref2vaSingleCall = capturedCalls.find((c) => c.url === `${REF2VA_BASE}/gradio_api/call/generate`);
+  const ref2vaSingleData = ref2vaSingleCall?.init?.body
+    ? JSON.parse(ref2vaSingleCall.init.body).data
+    : null;
+  eq(
+    "missing ref2va references ride as literal nulls at 2 and 4 (9 slots kept)",
+    JSON.stringify(ref2vaSingleData),
+    JSON.stringify([
+      "the sea breathes",
+      fileData("/tmp/gradio/b183f4/ref-1.png"),
+      null,
+      "4-step",
+      null,
+      "1344x768 · 16:9 (trained)",
+      5,
+      7,
+      false,
+    ]),
+  );
+  eq("the single-ref ref2va data[] still has all 9 slots", ref2vaSingleData?.length, 9);
 }
 
 /** The Blob/File entry of the stubbed multipart body, described for messages. */

@@ -1627,6 +1627,9 @@ const pollinationsImageBindings: ModelProviderBinding[] = [
  */
 const GRADIO_BASE_URL_Z_IMAGE = "https://mrfakename-z-image-turbo.hf.space";
 const GRADIO_BASE_URL_WAN = "https://multimodalart-wan2-1-fast.hf.space";
+const GRADIO_BASE_URL_MOSS = "https://hugging-apps-moss-image-8-step-dmd.hf.space";
+const GRADIO_BASE_URL_MINIMAX_REF2VA =
+  "https://hugging-apps-smd-minimax-h3-ref2va-few-step.hf.space";
 
 const gradioBindings: readonly ModelProviderBinding[] = [
   {
@@ -1689,14 +1692,82 @@ const gradioBindings: readonly ModelProviderBinding[] = [
       fileInputs: ["0"],
     },
   },
+  {
+    // hugging-apps/moss-image-8-step-dmd · fn /generate (spike addendum,
+    // verified from /gradio_api/info). data = [prompt, height(1024),
+    // width(1024), num_steps(8), seed(0), randomize_seed(true),
+    // lora_strength(0.7)]. Note num_steps is a FLOAT upstream and
+    // lora_strength has no counterpart on any other recorded Space.
+    modelId: "moss-image-8-step-dmd",
+    providerId: "hf-gradio",
+    upstreamModelId: "/generate",
+    family: "standard",
+    baseUrl: GRADIO_BASE_URL_MOSS,
+    keyEnv: "HF_TOKEN",
+    mediaStaging: "remote-url",
+    argMap: {
+      sources: {
+        "0": "prompt",
+        "4": "seed",
+      },
+      constants: {
+        "1": 1024,
+        "2": 1024,
+        "3": 8,
+        "5": true,
+        "6": 0.7,
+      },
+      // Text-to-image only: the Space declares no file parameter.
+    },
+  },
+  {
+    // hugging-apps/smd-minimax-h3-ref2va-few-step · fn /generate (spike
+    // addendum). data = [prompt, reference_1(FileData), reference_2(FileData),
+    // variant("4-step"|"8-step"), reference_3(FileData), canvas(Literal),
+    // duration(5), seed(42), randomize_seed(false)].
+    //
+    // CRITICAL — `variant` sits BETWEEN reference_2 and reference_3. The refs
+    // are NOT contiguous (1, 2, 4); a contiguous-refs assumption would put the
+    // step-count string into reference_3's image slot.
+    //
+    // `canvas` is a Literal carrying BOTH resolution and ratio, so the catalog
+    // ratio cannot ride a source slot: GradioArgMap has NO valueMap, and the
+    // shared source resolver has no "duration" case. The canvas is therefore a
+    // CONSTANT (the upstream default, 1344x768 · 16:9) and the duration is the
+    // upstream default 5 — the ratio→canvas mapping needs an argMap valueMap
+    // (and a duration source) before a picker can be wired.
+    modelId: "smd-minimax-h3-ref2va-few-step",
+    providerId: "hf-gradio",
+    upstreamModelId: "/generate",
+    family: "standard",
+    baseUrl: GRADIO_BASE_URL_MINIMAX_REF2VA,
+    keyEnv: "HF_TOKEN",
+    mediaStaging: "remote-url",
+    argMap: {
+      sources: {
+        "0": "prompt",
+        "1": { kind: "referenceAt", index: 0 },
+        "2": { kind: "referenceAt", index: 1 },
+        "4": { kind: "referenceAt", index: 2 },
+        "7": "seed",
+      },
+      constants: {
+        "3": "4-step",
+        "5": "1344x768 · 16:9 (trained)",
+        "6": 5,
+        "8": false,
+      },
+      fileInputs: ["1", "2", "4"],
+    },
+  },
 ];
 
 /**
- * C1 static binding set: 11 image models + 17 video models, each with a Kie
+ * C1 static binding set: 21 image models + 21 video models, each with a Kie
  * binding (`upstreamModelId = apiId`), plus Azure and Codex for `gpt-image-2`,
  * OpenRouter for the 19 SHIP image models and the 12 swept VIDEO models,
- * Pollinations for the 11 SHIP image models, and the two P7b `hf-gradio`
- * Space bindings → 65 code-defined bindings.
+ * Pollinations for the 11 SHIP image models, and the four P7b `hf-gradio`
+ * Space bindings (two original + two operator-supplied Spaces).
  * Immutable by convention — merge copies for overrides (the registry never
  * mutates these).
  */

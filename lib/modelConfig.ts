@@ -551,6 +551,32 @@ export const IMAGE_MODELS: ImageModel[] = [
       promptMaxLength: 3000,
     },
   },
+  // ── HF Spaces (P7b) ────────────────────────────────────────────────────────
+  {
+    // hugging-apps/moss-image-8-step-dmd · fn /generate — a PUBLIC HF Space.
+    // The positional signature is frozen in
+    // docs/fixtures/phase7/moss-image-8-step-dmd-info.json and mapped by the
+    // code-seeded `hf-gradio` binding (lib/providers/bindings.ts); the Space's
+    // height/width/num_steps/lora slots are binding constants, not catalog
+    // pickers. `apiId` is only the logical id: the gradio binding's
+    // `upstreamModelId` is the fn channel ("/generate"), never a model string.
+    // NOTE: the generic Kie map (`IMAGE_MODELS.map(kieImageBinding)`) still
+    // yields a Kie binding for every catalog id, so the provider union is
+    // kie+hf-gradio; the Space lane is the one this entry exists for.
+    id: "moss-image-8-step-dmd",
+    apiId: "moss-image-8-step-dmd",
+    name: "Moss Image 8-Step DMD",
+    provider: "HF Space",
+    ratios: ["1:1", "3:4", "4:3", "16:9", "9:16"],
+    supportsImages: false,
+    maxImages: 0,
+    supportsQuality: false,
+    apiInput: {
+      aspectRatioKey: "aspect_ratio",
+      // Not published by the Space — a UI-side cap only.
+      promptMaxLength: 4000,
+    },
+  },
 ];
 
 // ── Video models ──────────────────────────────────────────────────────────────
@@ -1277,6 +1303,40 @@ export const VIDEO_MODELS: VideoModel[] = [
       durationKey: "duration",
       durationMin: 0,
       durationMax: 0,
+      promptMaxLength: 4000,
+    },
+  },
+  // ── HF Spaces (P7b) ────────────────────────────────────────────────────────
+  {
+    // hugging-apps/smd-minimax-h3-ref2va-few-step · fn /generate — a PUBLIC HF
+    // Space. Signature frozen in
+    // docs/fixtures/phase7/smd-minimax-h3-ref2va-few-step-info.json. The
+    // reference images are the `resource` handle (three slots, mapped by the
+    // binding's fileInputs 1/2/4 — `variant` sits BETWEEN reference_2 and
+    // reference_3 on the wire). No duration picker: the gradio argMap cannot
+    // carry a duration source today, so the binding pins the upstream default
+    // (5 s) and the catalog exposes no control that could lie about it.
+    // NOTE: the generic Kie map still yields a Kie binding for every catalog
+    // id (provider union kie+hf-gradio) — the Space lane is the real backend.
+    id: "smd-minimax-h3-ref2va-few-step",
+    apiId: "smd-minimax-h3-ref2va-few-step",
+    name: "MiniMax H3 Ref2VA Few-Step",
+    provider: "HF Space",
+    ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"],
+    durations: [],
+    defaultDuration: 5,
+    defaultRatio: "16:9",
+    handles: ["prompt", "resource"],
+    sound: false,
+    supportsSeeds: true,
+    maxResources: 3,
+    apiInput: {
+      aspectRatioKey: "aspect_ratio",
+      durationKey: "duration",
+      // Upstream publishes "between 2 and 10" — the route's clamp bounds, not a
+      // picker (the binding sends its constant 5 regardless).
+      durationMin: 2,
+      durationMax: 10,
       promptMaxLength: 4000,
     },
   },

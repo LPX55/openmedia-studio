@@ -151,6 +151,7 @@ async function main() {
   const bindingsMod = await import(pathToFileURL(join(ROOT, "lib/providers/bindings.ts")).href);
   const registryMod = await import(pathToFileURL(join(ROOT, "lib/providers/registry.ts")).href);
   const adaptersMod = await import(pathToFileURL(join(ROOT, "lib/providers/adapters/gradio.ts")).href);
+  const httpSafeMod = await import(pathToFileURL(join(ROOT, "lib/providers/adapters/httpSafe.ts")).href);
 
   const { BUILT_IN_BINDINGS } = bindingsMod;
   const { get, resolveForModel } = registryMod;
@@ -711,7 +712,36 @@ async function main() {
     JSON.stringify({ hangAborted, rejected: hangResult.rejected, name: hangResult.err?.name }),
   );
 
-  // ── 12. READINESS ───────────────────────────────────────────────────────────
+  // ── 12. SSE WIRE GRAMMAR — CRLF framing ────────────────────────────────────
+  // P7c finding: every committed capture under docs/fixtures/phase7 is
+  // "\r\n"-framed. Before the shared parser normalised CRLF, this fixture was
+  // only ever proving the adapter against a wire format real Spaces do not
+  // send — a green suite that could not fail on the actual bytes.
+  section("SSE wire grammar — CRLF framing (the real capture shape)");
+  const crlfStream = 'event: message\r\ndata: {"a":1}\r\n\r\nevent: heartbeat\r\ndata: null\r\n\r\n';
+  const parsedCrlf = httpSafeMod.framesFrom(crlfStream);
+  eq("CRLF-framed SSE parses into frames (not one giant block)", parsedCrlf.frames.length, 2);
+  eq("the CRLF frame keeps its event name", parsedCrlf.frames[0]?.event, "message");
+  eq("the CRLF frame keeps its payload", parsedCrlf.frames[0]?.data, '{"a":1}');
+  eq("a fully consumed CRLF buffer leaves no remainder", parsedCrlf.rest, "");
+
+  // A transport chunk boundary that lands exactly between CR and LF must not
+  // fabricate a frame boundary out of the split pair.
+  const crHead = "event: message\r";
+  const crTail = '\ndata: {"a":1}\r\n\r\n';
+  const crFirst = httpSafeMod.framesFrom(crHead);
+  eq("a CR at the chunk boundary emits no frame yet", crFirst.frames.length, 0);
+  const crSecond = httpSafeMod.framesFrom(crFirst.rest + crTail);
+  eq("the CR/LF split reassembles into exactly one frame", crSecond.frames.length, 1);
+  eq("...and the payload survives the split", crSecond.frames[0]?.data, '{"a":1}');
+
+  // Proxies do normalise parts of a stream; a mixed LF/CRLF body still parses.
+  const mixedStream = "event: a\r\ndata: 1\n\nevent: b\ndata: 2\r\n\r\n";
+  const parsedMixed = httpSafeMod.framesFrom(mixedStream);
+  eq("a mixed LF/CRLF stream parses both frames", parsedMixed.frames.length, 2);
+  eq("mixed framing preserves frame order", parsedMixed.frames.map((f) => f.event).join(","), "a,b");
+
+  // ── 13. READINESS ───────────────────────────────────────────────────────────
   section("readiness — base URL required, the HF token optional");
   const noBase = gradioProvider.checkReadiness(
     { ...credentials, baseUrl: null },

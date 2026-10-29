@@ -54,6 +54,12 @@ import type {
   SubmitOutcome,
 } from "../types";
 import { resolveFieldValue } from "./sources";
+import {
+  framesFrom,
+  pinnedFetch,
+  sameOriginSafe,
+  type SseFrame,
+} from "./httpSafe";
 
 /** The whole submit shares one budget (mirrors openaiCompat's bounded POST). */
 const SUBMIT_TIMEOUT_MS = 60_000;
@@ -280,34 +286,6 @@ async function submit(input: GenerateInput): Promise<SubmitOutcome> {
 // ── Poll ────────────────────────────────────────────────────────────────────
 
 /**
- * One SSE frame: the `event:` value and the joined `data:` payload.
- * (Gradio's `data:` may be split across lines on transport — join with "\n".)
- */
-interface SseFrame {
-  event: string;
-  data: string;
-}
-
-function framesFrom(chunk: string): { frames: SseFrame[]; rest: string } {
-  const frames: SseFrame[] = [];
-  let rest = chunk;
-  for (;;) {
-    const idx = rest.indexOf("\n\n");
-    if (idx < 0) break;
-    const block = rest.slice(0, idx);
-    rest = rest.slice(idx + 2);
-    let event = "message";
-    const dataLines: string[] = [];
-    for (const line of block.split("\n")) {
-      if (line.startsWith("event:")) event = line.slice(6).trim();
-      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
-    }
-    frames.push({ event, data: dataLines.join("\n") });
-  }
-  return { frames, rest };
-}
-
-/**
  * The first FileData-ish entry of a completed payload — a recursive scan,
  * because the payload shape is Space-dependent (`FileData` bare, `[FileData]`,
  * or `[VideoData]` with the file nested under `video`/`image`).
@@ -358,19 +336,6 @@ type FileUrlResolution =
   | { outcome: "resolved"; url: string }
   | { outcome: "foreign"; candidate: string }
   | { outcome: "missing" };
-
-/** http(s), no userinfo, origin === pinned origin. Everything else is "no". */
-function sameOriginSafe(candidate: string, origin: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(candidate);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
-  if (parsed.username || parsed.password) return false;
-  return parsed.origin === origin;
-}
 
 function fileUrlOf(origin: string, entry: { path?: string; url?: string }): FileUrlResolution {
   let foreign: string | undefined;
@@ -441,14 +406,14 @@ async function pollWind(
   // as the last fallback.
   const token = resolveSpaceToken(cfg, undefined);
 
-  const res = await fetch(statusUrl, {
+  const res = await pinnedFetch(statusUrl, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
-    signal: AbortSignal.timeout(POLL_TICK_TIMEOUT_MS),
-    // A 30x from the pinned origin must NOT be followed: the Location target
-    // would inherit this tick's Authorization header (and the next tick's)
-    // without ever being pinned. redirect:"error" makes any redirect a
-    // transient throw — the job loop retries, the Space self-heals or fails.
-    redirect: "error",
+    timeoutMs: POLL_TICK_TIMEOUT_MS,
+    // pinnedFetch enforces redirect:"error": a 30x from the pinned origin must
+    // NOT be followed — the Location target would inherit this tick's
+    // Authorization header (and the next tick's) without ever being pinned.
+    // Any redirect becomes a transient throw — the job loop retries, the
+    // Space self-heals or fails.
   });
   if (!res.ok) {
     // A non-SSE status answer is a transport-level failure — transient: the
@@ -515,10 +480,9 @@ async function pollWind(
           // (the openaiCompat video-buffers parity — "buffers, not URLs").
           // NEVER hand the (possibly token-gated) URL to the settle funnel.
           try {
-            const fileRes = await fetch(fileUrl, {
+            const fileRes = await pinnedFetch(fileUrl, {
               headers: { Authorization: `Bearer ${token}` },
-              signal: AbortSignal.timeout(POLL_TICK_TIMEOUT_MS),
-              redirect: "error",
+              timeoutMs: POLL_TICK_TIMEOUT_MS,
             });
             if (!fileRes.ok) {
               // Not ready yet / hiccup — keep the task alive for the next tick.

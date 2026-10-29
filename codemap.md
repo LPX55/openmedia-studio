@@ -29,7 +29,7 @@ Free & open-source visual AI workflow builder for image and video generation. In
 | Directory | Responsibility Summary | Detailed Map |
 |-----------|------------------------|--------------|
 | `app/` | Root App Router shell: layout chrome, `/` redirect, global canvas stylesheet. | [View Map](app/codemap.md) |
-| `app/api/` | 27 route handlers: generation dispatch, asset ingest/tools, folders/gallery, jobs (poll/SSE), settings keys, misc (credit, update-check). | [View Map](app/api/codemap.md) |
+| `app/api/` | 28 route handlers: generation dispatch, asset ingest/tools, folders/gallery, jobs (poll/SSE/log), settings keys + providers catalog, misc (credit, update-check). | [View Map](app/api/codemap.md) |
 | `app/chat/` | Assistant chat page (landing vs window, SSE streaming). | [View Map](app/chat/codemap.md) |
 | `app/gallery/` | Media history library (tabs, @mention engine, pending-gen resume). | [View Map](app/gallery/codemap.md) |
 | `app/generated/` | Static-media fallback route (MEDIA_DIR streaming, traversal guards). | [View Map](app/generated/codemap.md) |
@@ -41,8 +41,11 @@ Free & open-source visual AI workflow builder for image and video generation. In
 | `components/ui/` | shadcn-style primitives on `@base-ui/react` + decorative components. | [View Map](components/ui/codemap.md) |
 | `lib/` | Shared core: Zustand stores, execution pipeline, server job lifecycle, media facades, model config. | [View Map](lib/codemap.md) |
 | `lib/guest/` | Server-only persistence: SQLite (`guest.db`), local-disk media store, spaces, settings. | [View Map](lib/guest/codemap.md) |
+| `lib/providers/` | Pluggable provider subsystem: adapter contract, registry, bootstrap, presets, media staging. | [View Map](lib/providers/codemap.md) |
+| `lib/providers/adapters/` | Backend adapters: kie, azure, codex, openai-compat. | [View Map](lib/providers/adapters/codemap.md) |
 | `hooks/` | Shared client hooks (`useIsMobile`). | [View Map](hooks/codemap.md) |
 | `scripts/` | Node-ESM automation overview (desktop packaging). | [View Map](scripts/codemap.md) |
 | `scripts/desktop/` | Desktop toolchain: dev runner, server stager, version guard, sidecar watchdog. | [View Map](scripts/desktop/codemap.md) |
+| `scripts/providers/` | OpenAI-compat smoke fixture (stubbed fetch, offline checks). | [View Map](scripts/providers/codemap.md) |
 | `src-tauri/` | Tauri v2 shell config/build: sidecar resources, capabilities, loader shim, splash. | [View Map](src-tauri/codemap.md) |
 | `src-tauri/src/` | Rust entry (`main.rs` shim, `lib.rs`: port pick, env repair, spawn/wait/kill sidecar). | [View Map](src-tauri/src/codemap.md) |

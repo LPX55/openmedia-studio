@@ -1,11 +1,50 @@
 # STATE
 status: active      # active | paused | blocked | done
-focus: repo forked to LPX55/openmedia-studio and renamed in-tree (package name, app title, sidebar brand + links, README/DESKTOP, update-check repo, alt/aria text); OpenRouter video lane verified live earlier on this branch
-next: verify the fork's CI/README render, decide whether to rename src-tauri productName + bundle id (deliberately untouched — breaks desktop update continuity), then merge feat/pluggable-providers; open items — unverified kie apiIds for the 10 new catalog rows, "Assets" nav placeholder, retry hardening, dead kieJobPoller, template E2E needs a public media host or kie key
-blockers: none (OR key $1/day cap, expires ~2026-10-21)
-updated: 2026-10-21
+focus: P7 (MCP servers + HF Spaces) SHIPPED through plan step 5 on feat/pluggable-providers — two new provider families, custom logical models, dynamic backends, Add-backend UI, two Spaces bound; 16 commits local and UNPUSHED
+next: (1) one deliberate live /edit_image probe to bind prithivMLmods/FireRed-Image-Edit-1.0-Fast (images_b64_json shape is unpublished — do not guess); (2) UAT the new Custom models picker group + Add backend card in a real session; (3) decide whether template graphs should offer Space-backed models (they still resolve to kie bindings); (4) push/PR call on the 16 commits
+blockers: none
+updated: 2026-10-29
 
 ## Notes
+
+- 2026-10-29 — P7 SHIPPED (plan step 5), 15 commits on `feat/pluggable-providers`, every one
+  gate-verified before it landed. WHAT EXISTS NOW: a `hf-gradio` family (positional `data[]`
+  dialect, per-tick 25s abort budget, SSE poll by event_id, in-adapter bearer byte fetch for
+  private Spaces, origin-pinned file URLs, CRLF-safe SSE reader) and an `mcp` family
+  (negotiated 2025-06-18 floor, session replay, one re-init on 404, bounded single tools/call,
+  four-case defensive parse, images-only v1). Shared `httpSafe` carries the origin pin +
+  redirect-refusing bounded fetch + SSE grammar for both. P7a: `kind`-keyed resolve hook so a
+  user-created backend id routes to its family adapter while `provider.id` stays the backend,
+  dynamic report enumeration, upload-dedupe keyed by provider+baseUrl+input, `allowPrivateUrl`
+  gated on BOTH binding and adapter capability, `custom_models` table + one server-side
+  catalog resolver (neutral base — never borrowed from a catalog entry), `customModels` in the
+  report, custom models in all three pickers, Add-backend card. THREE SILENT-WRONG PATHS
+  CLOSED that only binding real Spaces exposed: CompatFieldSource advertised duration/sound/
+  frames/inputReferences but resolved all four to undefined (two now implemented, two loud);
+  GradioArgMap had no valueMap so minimax's `canvas` Literal silently forced 16:9 on a 9:16
+  request; every catalog row received the generic Kie binding so both Space models defaulted
+  to a backend that cannot serve them (`kieServable` marker is the only predicate that drops
+  exactly those two). BOUND: moss-image-8-step-dmd (t2i) + smd-minimax-h3-ref2va-few-step
+  (ref2video — `variant` sits BETWEEN reference_2 and reference_3, the sharpest position≠order
+  case yet). DELIBERATELY UNBOUND: JCisHERE/wan2-2-i2v-v3 (adult LoRA enum as a model param is
+  a product call, not plumbing — its wire facts still recorded) and FireRed (unpublished
+  images_b64_json encoding). Suites: smoke-compat 453, smoke-gradio 103, smoke-mcp 88,
+  check-workflows 623; tsc 0 throughout. Docs: docs/adding-a-space-or-mcp-server.md (operator
+  walkthrough), docs/provider-phase7-spike.md (live captures + operator-supplied signatures),
+  docs/fixtures/phase7/ (byte-exact captures incl. a real DeepWiki tools/call). KNOWN GAPS:
+  no custom-MODEL creation form (API-driven by design), template graphs still resolve to kie.
+
+- 2026-10-29 — P7 PLAN DRAFTED (pending peer review): docs/provider-mcp-spaces-plan.md — two new
+  provider families: `mcp` (sync tools/call, one adapter for any MCP server incl. HF Space MCP)
+  and `hf-gradio` (async queue API, event_id → SSE poll). Key verified facts baked in: Gradio
+  rejects the 2026-07-28 MCP revision (pin 2025-06-18), positional `data` arrays from
+  /gradio_api/info order (never UI order), private Spaces must return BYTES (funnel mirror sends
+  no auth), ZeroGPU quota is caller-attributed (always send the HF token). Deliberately relaxed:
+  the old HF-wrapper rejection (Space = user-owned backend) and C6 custom-logical-models ban
+  (P7a-1, new `custom_models` table — the one schema-touching lane). Suggested build order:
+  P7a infra → P7c mcp → P7b gradio; smoke fixtures follow the offline stubbed-fetch pattern of
+  smoke-compat.mjs. AGENTS.md also rewritten in-place this session (compact commands/architecture/
+  constraints, all verified against config).
 
 - 2026-10-21 — FORK + RENAME: `SegFault42/HeliosGen` is now forked to **`LPX55/openmedia-studio`** and
   the working tree renamed to match on every user-facing surface — `package.json`

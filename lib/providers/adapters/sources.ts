@@ -58,11 +58,19 @@ function referenceAt(input: GenerateInput, source: ReferenceAtSource): string | 
  * on needs basis only"). Gradio slots translate `undefined` into a literal
  * `null` on the OUTSIDE (a positional array must keep its shape) — that
  * translation is the CALLER's (gradio.ts), never this resolver's.
+ *
+ * A source whose value has no scalar/array representation in the shared union
+ * ("frames" / "inputReferences" — the typed `frame_images` / `input_references`
+ * OBJECTS of the video dialect) is NOT silently dropped: it throws a specific
+ * error naming the source. Those shapes are built by `openaiCompat.ts`'s video
+ * dialect (`buildVideoFrames` / `buildVideoInputReferences`); a lossy URL list
+ * here would be a silent-wrong request. Use the single-file slots
+ * ("startFrame" / "endFrame" / "videoRef" / referenceAt) for positional slots.
  */
 export function resolveFieldValue(
   source: CompatFieldSource,
   input: GenerateInput,
-): string | number | string[] | undefined {
+): string | number | string[] | boolean | undefined {
   // The parameterized source is an OBJECT, not a string — dispatch it first
   // so the string switch below never needs to care.
   if (typeof source === "object" && source !== null) {
@@ -101,6 +109,31 @@ export function resolveFieldValue(
       const apiInput = (input.model as { apiInput?: { outputFormat?: string } }).apiInput;
       return apiInput?.outputFormat;
     }
+    // ── VIDEO sources (the OpenRouter video dialect's normalized values) ─────
+    // "duration"/"sound" are plain normalized params, so they resolve here for
+    // EVERY family (a gradio slot or an mcp argument can map them too).
+    case "duration":
+      return typeof p.duration === "number" && Number.isFinite(p.duration)
+        ? p.duration
+        : undefined;
+    case "sound":
+      return typeof p.sound === "boolean" ? p.sound : undefined;
+    case "frames":
+      throw new Error(
+        'sources: the "frames" field source is not implemented in the shared ' +
+          'resolver — the video dialect shapes it into typed frame OBJECTS ' +
+          '(buildVideoFrames: {type, image_url, frame_type}), which a scalar/' +
+          'array value cannot carry. Map "startFrame"/"endFrame" for one ' +
+          "positional frame slot.",
+      );
+    case "inputReferences":
+      throw new Error(
+        'sources: the "inputReferences" field source is not implemented in ' +
+          "the shared resolver — the video dialect shapes it into typed " +
+          "reference OBJECTS (buildVideoInputReferences: image_url / " +
+          "video_url / audio_url), which a scalar/array value cannot carry. " +
+          'Map "references"/"videoRef" for positional reference slots.',
+      );
     // ── P7b single-file slots (plan rev-2, spike-fed) ────────────────────────
     // Each returns the staged media's URL-or-uploaded-path string for ONE
     // positional slot (wan2-1-fast's data[0] `input_image`, FLUX.1-Kontext's
@@ -121,8 +154,8 @@ export function resolveFieldValue(
  * an endpoint's enum rejects — the server default applies instead). */
 export function applyValueMap(
   valueMap: Record<string, string | null> | undefined,
-  value: string | number | string[],
-): string | number | string[] | undefined {
+  value: string | number | string[] | boolean,
+): string | number | string[] | boolean | undefined {
   if (!valueMap || typeof value !== "string") return value;
   if (!(value in valueMap)) return value;
   const mapped = valueMap[value];

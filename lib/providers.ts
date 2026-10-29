@@ -26,8 +26,17 @@ export const PROVIDERS = [
   { id: "pollinations", label: "Pollinations" },
 ] as const;
 
-/** Static catalog ids — the models whose C1 default backend is Kie. */
-const CATALOG_MODEL_IDS = new Set([...IMAGE_MODELS, ...VIDEO_MODELS].map((m) => m.id));
+/**
+ * Static catalog ids whose historical fallback backend is Kie. Space-only
+ * catalog entries (`kieServable: false`) are deliberately NOT here: Kie cannot
+ * serve them, so claiming it as a pre-hydration default would be a silent
+ * wrong backend. The hydrated report names their real backend (`hf-gradio`).
+ */
+const KIE_DEFAULT_MODEL_IDS = new Set(
+  [...IMAGE_MODELS, ...VIDEO_MODELS]
+    .filter((m) => m.kieServable !== false)
+    .map((m) => m.id),
+);
 
 /**
  * Provider ids the client understands.
@@ -131,10 +140,11 @@ export function saveModelProviders(map: Record<string, ProviderId>) {
  * nor the server report names one.
  *
  * Resolution: the stored pref (`modelPrefs`) → the report's per-model union
- * (`bindingsByModel[0]`) → the historical Kie default for a STATIC CATALOG
- * model only. A custom model (an id the static catalog does not contain)
- * NEVER inherits the Kie default: it returns its reported provider, or
- * `undefined` when the report knows no binding for it.
+ * (`bindingsByModel[0]`) → the historical Kie default for a Kie-SERVABLE
+ * static catalog model only. A custom model (an id the static catalog does not
+ * contain) and a Space-only catalog entry (`kieServable: false`) NEVER inherit
+ * the Kie default: they return their reported provider, or `undefined` when
+ * the report knows no binding for them.
  *
  * The widened `ProviderId | undefined` return is deliberate (P7a-1): an
  * unbound custom model has NO honest backend, and callers that render a
@@ -148,7 +158,7 @@ export function getModelProviderOrUndefined(modelId: string): ProviderId | undef
   if (pref) return pref;
   const reported = bindingsByModel[modelId]?.[0];
   if (reported) return reported;
-  return CATALOG_MODEL_IDS.has(modelId) ? "kie" : undefined;
+  return KIE_DEFAULT_MODEL_IDS.has(modelId) ? "kie" : undefined;
 }
 
 /** The backend for `modelId`, or `undefined` for an unbound custom model. */

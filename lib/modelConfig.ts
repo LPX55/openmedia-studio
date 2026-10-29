@@ -17,6 +17,14 @@ export interface ImageModel {
   name: string;
   /** Provider label (groups models in the dropdown) */
   provider: string;
+  /**
+   * Whether the GENERIC Kie binding applies to this model (default true).
+   *
+   * False for a catalog entry that exists ONLY for a non-Kie backend (an HF
+   * Space): its `apiId` is a logical id, not a Kie model string, so emitting
+   * the generic Kie binding would claim a backend that cannot serve it.
+   */
+  kieServable?: boolean;
   /** Available aspect ratios */
   ratios: string[];
   /** Whether this model accepts reference images */
@@ -560,13 +568,14 @@ export const IMAGE_MODELS: ImageModel[] = [
     // height/width/num_steps/lora slots are binding constants, not catalog
     // pickers. `apiId` is only the logical id: the gradio binding's
     // `upstreamModelId` is the fn channel ("/generate"), never a model string.
-    // NOTE: the generic Kie map (`IMAGE_MODELS.map(kieImageBinding)`) still
-    // yields a Kie binding for every catalog id, so the provider union is
-    // kie+hf-gradio; the Space lane is the one this entry exists for.
+    // `kieServable: false` keeps the generic Kie map from claiming a backend
+    // that cannot serve this Space-only entry — the provider union is
+    // hf-gradio alone.
     id: "moss-image-8-step-dmd",
     apiId: "moss-image-8-step-dmd",
     name: "Moss Image 8-Step DMD",
     provider: "HF Space",
+    kieServable: false,
     ratios: ["1:1", "3:4", "4:3", "16:9", "9:16"],
     supportsImages: false,
     maxImages: 0,
@@ -598,6 +607,14 @@ export interface VideoModel {
   imageApiId?: string;
   name: string;
   provider: string;
+  /**
+   * Whether the GENERIC Kie binding applies to this model (default true).
+   *
+   * False for a catalog entry that exists ONLY for a non-Kie backend (an HF
+   * Space): its `apiId` is a logical id, not a Kie model string, so emitting
+   * the generic Kie binding would claim a backend that cannot serve it.
+   */
+  kieServable?: boolean;
   ratios: string[];
   durations: number[];
   defaultDuration: number;
@@ -1313,15 +1330,16 @@ export const VIDEO_MODELS: VideoModel[] = [
     // docs/fixtures/phase7/smd-minimax-h3-ref2va-few-step-info.json. The
     // reference images are the `resource` handle (three slots, mapped by the
     // binding's fileInputs 1/2/4 — `variant` sits BETWEEN reference_2 and
-    // reference_3 on the wire). No duration picker: the gradio argMap cannot
-    // carry a duration source today, so the binding pins the upstream default
-    // (5 s) and the catalog exposes no control that could lie about it.
-    // NOTE: the generic Kie map still yields a Kie binding for every catalog
-    // id (provider union kie+hf-gradio) — the Space lane is the real backend.
+    // reference_3 on the wire). No duration picker: the catalog exposes no
+    // duration control, so the binding keeps the upstream default (5 s).
+    // `kieServable: false` keeps the generic Kie map from claiming a backend
+    // that cannot serve this Space-only entry — the provider union is
+    // hf-gradio alone.
     id: "smd-minimax-h3-ref2va-few-step",
     apiId: "smd-minimax-h3-ref2va-few-step",
     name: "MiniMax H3 Ref2VA Few-Step",
     provider: "HF Space",
+    kieServable: false,
     ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"],
     durations: [],
     defaultDuration: 5,

@@ -145,9 +145,18 @@ function fileDataOf(value: string): { path: string | null; url?: string; meta: {
  * a literal `null` — Gradio's wire shape for "use the upstream default". The
  * array's shape itself must NEVER shrink (positional order is authoritative).
  *
- * Resolution order at each index: fileInputs slot (a staged media wrapped
- * into FileData) → constant → source — the spec's precedence, so a fileIndex
- * listed in `sources` AND `fileInputs` still ends up wrapped.
+ * Resolution order at each index:
+ *
+ *   1. fileInputs slot — a staged media wrapped into FileData (so a fileIndex
+ *      listed in `sources` AND `fileInputs` still ends up wrapped);
+ *   2. an index WITH a `valueMap`: resolve its source, translate the string
+ *      value to the upstream literal. A mapped string WINS; a `null` entry,
+ *      an UNMAPPED value, or an unresolved source falls back to the index's
+ *      `constants` entry (then to a literal `null`) — the constant is the
+ *      fallback, never a competing value;
+ *   3. constant (the pre-valueMap precedence for indices without a valueMap);
+ *   4. source value;
+ *   5. literal `null`.
  */
 function buildDataArray(
   input: GenerateInput,
@@ -155,6 +164,7 @@ function buildDataArray(
 ): unknown[] {
   const sources = argMap.sources ?? {};
   const constants = argMap.constants ?? {};
+  const valueMaps = argMap.valueMap ?? {};
   const fileInputs = new Set(argMap.fileInputs ?? []);
   const indices = new Set([
     ...Object.keys(sources),
@@ -176,11 +186,29 @@ function buildDataArray(
       data.push(typeof value === "string" && value ? fileDataOf(value) : null);
       continue;
     }
+
+    const source = sources[key];
+    const valueMap = valueMaps[key];
+    if (valueMap && source !== undefined) {
+      const value = resolveFieldValue(
+        source as Parameters<typeof resolveFieldValue>[0],
+        input,
+      );
+      const mapped = typeof value === "string" ? valueMap[value] : undefined;
+      if (typeof mapped === "string") {
+        data.push(mapped);
+        continue;
+      }
+      // `null`, an unmapped value, or an unresolved source ⇒ the constant is
+      // the fallback; with no constant the slot takes the upstream default.
+      data.push(key in constants ? constants[key] : null);
+      continue;
+    }
+
     if (key in constants) {
       data.push(constants[key]);
       continue;
     }
-    const source = sources[key];
     if (source === undefined) {
       data.push(null);
       continue;

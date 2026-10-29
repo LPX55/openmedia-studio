@@ -82,8 +82,25 @@ if (!process.execArgv.some((a) => a.startsWith("--disable-warning"))) {
 // resolve hook (registered through node:module) bridges both — the SAME hook
 // smoke-compat.mjs installs (P7a-0 pins this fixture as the resolve hook's
 // permanent consumer, plan §a).
+//
+// `lib/providers.ts` (the client helper asserted at the end) imports
+// `lib/store.ts`, whose `@xyflow/react` import mixes TYPE-only names with
+// values. Node's native type stripping keeps that mixed import, so the ESM
+// build has no runtime `Connection`/`EdgeChange` export. A tiny stub keeps the
+// CLIENT HELPER importable here — the helper under test never touches React
+// Flow, and this fixture never renders anything.
+const XYFLOW_STUB = "data:text/javascript," + encodeURIComponent(
+  ["Node", "Edge", "Connection", "NodeChange", "EdgeChange"]
+    .map((name) => `export const ${name} = undefined;`)
+    .join("") +
+    "export const addEdge = () => [];" +
+    "export const applyNodeChanges = (_changes, nodes) => nodes;" +
+    "export const applyEdgeChanges = (_changes, edges) => edges;",
+);
 const RESOLVE_HOOK = `
+const XYFLOW_STUB = ${JSON.stringify(XYFLOW_STUB)};
 export async function resolve(specifier, context, nextResolve) {
+  if (specifier === "@xyflow/react") return { url: XYFLOW_STUB, shortCircuit: true };
   let spec = specifier;
   if (spec.startsWith("@/")) spec = ${JSON.stringify(ROOT)} + "/" + spec.slice(2);
   try {
@@ -153,6 +170,22 @@ async function main() {
   savedHfToken = process.env.HF_TOKEN;
   delete process.env.HF_TOKEN;
 
+  // `lib/store.ts` (reached through the CLIENT helper lib/providers.ts) hydrates
+  // its zustand persist wrapper from localStorage at import time. Node has no
+  // localStorage; a memory stub keeps the helper importable — the assertions
+  // below never persist anything.
+  if (!globalThis.localStorage) {
+    const memory = new Map();
+    globalThis.localStorage = {
+      getItem: (key) => memory.get(key) ?? null,
+      setItem: (key, value) => { memory.set(key, String(value)); },
+      removeItem: (key) => { memory.delete(key); },
+      clear: () => memory.clear(),
+      key: (index) => [...memory.keys()][index] ?? null,
+      get length() { return memory.size; },
+    };
+  }
+
   // ── Imports (repo modules, loaded through the resolve hook) ───────────────
   const bootstrap = await import(pathToFileURL(join(ROOT, "lib/providers/bootstrap.ts")).href);
   const bindingsMod = await import(pathToFileURL(join(ROOT, "lib/providers/bindings.ts")).href);
@@ -160,8 +193,10 @@ async function main() {
   const adaptersMod = await import(pathToFileURL(join(ROOT, "lib/providers/adapters/gradio.ts")).href);
   const httpSafeMod = await import(pathToFileURL(join(ROOT, "lib/providers/adapters/httpSafe.ts")).href);
   const stagerMod = await import(pathToFileURL(join(ROOT, "lib/providers/mediaStager.ts")).href);
+  const providersMod = await import(pathToFileURL(join(ROOT, "lib/providers.ts")).href);
+  const storeMod = await import(pathToFileURL(join(ROOT, "lib/store.ts")).href);
 
-  const { BUILT_IN_BINDINGS } = bindingsMod;
+  const { BUILT_IN_BINDINGS, getAvailableProvidersForModel } = bindingsMod;
   const { get, resolveForModel } = registryMod;
   const { gradioProvider, POLL_TICK_TIMEOUT_MS } = adaptersMod;
 
@@ -993,7 +1028,7 @@ async function main() {
       fileData("https://pics.example/ref-2.png"),
       "4-step",
       fileData("/tmp/gradio/b183f4/ref-3.png"),
-      "1344x768 · 16:9 (trained)",
+      "768x1344 · 9:16",
       5,
       7,
       false,
@@ -1004,13 +1039,40 @@ async function main() {
     ref2vaSubmitted.mode + ":" + ref2vaSubmitted.upstreamTaskId,
     "async:evt-ref2va-1",
   );
-  // RECORDED LIMITATION: GradioArgMap has no valueMap, so the requested 9:16
-  // ratio cannot reach the canvas Literal — the constant default rides instead.
-  // This assertion pins today's behavior; it must change when valueMap lands.
+  // The argMap valueMap translates the catalog ratio into the Space's canvas
+  // Literal: a 9:16 request must NOT silently produce the trained 16:9 video.
   eq(
-    "the ref2va canvas stays the constant default (ratio→canvas needs a valueMap)",
+    "the ref2va 9:16 request maps to the 9:16 canvas literal",
     ref2vaData?.[5],
+    "768x1344 · 9:16",
+  );
+
+  // An UNKNOWN ratio is not in the valueMap ⇒ the constant fallback rides (the
+  // slot never becomes null and the trained canvas is never silently replaced).
+  capturedCalls.length = 0;
+  await gradioProvider.submit({
+    taskId: "smoke-gradio-task",
+    kind: "video",
+    model: ref2vaModel,
+    binding: ref2vaResolved.binding,
+    prompt: "the sea breathes",
+    params: { seed: 7, aspectRatio: "21:9" },
+    media: { references: [refStaged("ref-1.png")] },
+    credentials,
+  });
+  const ref2vaUnknownCall = capturedCalls.find((c) => c.url === `${REF2VA_BASE}/gradio_api/call/generate`);
+  const ref2vaUnknownData = ref2vaUnknownCall?.init?.body
+    ? JSON.parse(ref2vaUnknownCall.init.body).data
+    : null;
+  eq(
+    "an unknown ratio falls back to the constant canvas",
+    ref2vaUnknownData?.[5],
     "1344x768 · 16:9 (trained)",
+  );
+  eq(
+    "the unknown-ratio request still sends the full 9-slot data[]",
+    ref2vaUnknownData?.length,
+    9,
   );
   // Only one reference supplied ⇒ slots 2 and 4 are literal nulls; the array
   // keeps its 9 slots (positional shape is authoritative, never compacted).
@@ -1045,6 +1107,60 @@ async function main() {
     ]),
   );
   eq("the single-ref ref2va data[] still has all 9 slots", ref2vaSingleData?.length, 9);
+
+  // ── 15. SPACE-ONLY MODELS — no Kie claim, the client default is hf-gradio ──
+  // The generic Kie map must not claim a backend that cannot serve these
+  // Space-only catalog entries (their apiId is a logical id, not a Kie model).
+  section("Space-only models — static union + client default");
+  const mossUnion = getAvailableProvidersForModel("moss-image-8-step-dmd");
+  const ref2vaUnion = getAvailableProvidersForModel("smd-minimax-h3-ref2va-few-step");
+  ok("moss has NO kie in its static provider union", !mossUnion.includes("kie"), JSON.stringify(mossUnion));
+  eq("moss resolves to hf-gradio alone", mossUnion, ["hf-gradio"]);
+  eq("ref2va resolves to hf-gradio alone", ref2vaUnion, ["hf-gradio"]);
+  eq("a Kie-served model still leads with kie", getAvailableProvidersForModel("z-image")[0], "kie");
+  // The server default-binding rule must not fall back to Kie either: with no
+  // explicit provider and no active row, a Space-only model resolves its own
+  // (only) static binding.
+  const mossDefault = resolveForModel("moss-image-8-step-dmd", undefined, []);
+  eq(
+    "the server default binding for a Space-only model is hf-gradio",
+    `${mossDefault.binding.providerId}:${mossDefault.binding.upstreamModelId}`,
+    "hf-gradio:/generate",
+  );
+
+  const { getModelProvider } = providersMod;
+  const { useWorkflowStore } = storeMod;
+  // Pre-hydration: a Space-only catalog entry must NOT fall back to Kie.
+  useWorkflowStore.setState({ modelProviders: {}, bindingsByModel: {}, providersHydrated: false });
+  eq(
+    "pre-hydration a Space-only model claims no backend",
+    getModelProvider("moss-image-8-step-dmd") ?? "none",
+    "none",
+  );
+  // The report's bindingsByModel (static union, no stored rows) and an EMPTY
+  // modelPrefs map — the client default must come from bindingsByModel[0].
+  useWorkflowStore.getState().setProviderBootstrap({
+    modelPrefs: {},
+    bindingsByModel: {
+      "moss-image-8-step-dmd": mossUnion,
+      "smd-minimax-h3-ref2va-few-step": ref2vaUnion,
+    },
+  });
+  eq(
+    "the moss client default is hf-gradio (no modelPrefs entry)",
+    getModelProvider("moss-image-8-step-dmd"),
+    "hf-gradio",
+  );
+  eq(
+    "the ref2va client default is hf-gradio (no modelPrefs entry)",
+    getModelProvider("smd-minimax-h3-ref2va-few-step"),
+    "hf-gradio",
+  );
+  eq(
+    "the report carried no modelPrefs entry for moss",
+    useWorkflowStore.getState().modelProviders["moss-image-8-step-dmd"] ?? null,
+    null,
+  );
 }
 
 /** The Blob/File entry of the stubbed multipart body, described for messages. */

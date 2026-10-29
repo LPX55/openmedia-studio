@@ -8,7 +8,7 @@
  * per-model provider union from `GET /api/settings/providers` (`bindingsByModel`),
  * never from this module.
  *
- * Scope: the 28 catalog models each get a code-defined Kie binding
+ * Scope: every Kie-SERVABLE catalog model gets a code-defined Kie binding
  * (`upstreamModelId = apiId` — the default-binding rule), plus `gpt-image-2`
  * gets Azure and Codex bindings. Rows in SQLite exist only for user overrides /
  * prefs / custom bindings; the built-ins below are code, not rows.
@@ -128,6 +128,16 @@ export interface ReferenceAtSource {
  *                   the resolved string into `{"path": <value>, "meta":
  *                   {"_type": "gradio.FileData"}}` (the uploaded /tmp/gradio
  *                   path or a public URL — both are valid `path` contents).
+ *  - `valueMap`   — index → normalized value → upstream literal. A slot that
+ *                   resolves a SOURCE value translates that value here before
+ *                   it lands in `data[]` (e.g. the minimax `canvas` Literal:
+ *                   catalog ratio "9:16" → "768x1344 · 9:16"). A `null`
+ *                   entry, an UNMAPPED value, or an unresolved source falls
+ *                   back to the index's `constants` entry (then to a literal
+ *                   `null` when there is none) — the constant is the
+ *                   fallback, never a competing value. Indices WITHOUT a
+ *                   `valueMap` keep the pre-valueMap precedence
+ *                   (constant → source).
  *
  * UNRESOLVED slots (no source / constant / file entry) ride as a literal
  * `null` — Gradio's wire shape for "use the upstream default", verified on the
@@ -137,10 +147,15 @@ export interface ReferenceAtSource {
 export interface GradioArgMap {
   /** data[] index (string key) → normalized source. */
   sources?: Record<string, CompatFieldSource>;
-  /** data[] index → static upstream value. */
+  /** data[] index → static upstream value (the valueMap fallback too). */
   constants?: Record<string, string | number | boolean>;
   /** data[] indices whose resolved value is wrapped into a FileData dict. */
   fileInputs?: string[];
+  /**
+   * data[] index → (normalized value → upstream literal). `null` = drop the
+   * mapped value and fall back to that index's constant (if any).
+   */
+  valueMap?: Record<string, Record<string, string | null>>;
 }
 
 /**
@@ -358,6 +373,20 @@ function deriveFamily(apiInput: VideoModel["apiInput"]): VideoPayloadFamily {
   if (apiInput.useImageUrls)       return "kie-image-urls";     // :361
   if (apiInput.useKlingElements)   return "kie-kling-elements"; // :368
   return "standard"; // seedance (:138), grok (:298), and the remaining default branch
+}
+
+/**
+ * Is this catalog model served by Kie?
+ *
+ * The ONLY reliable signal is the catalog's explicit `kieServable` marker
+ * (default true): a model whose `apiId` happens to equal its logical id is
+ * still Kie-served (`z-image`, `nano-banana-2`, `veo3_lite`, …), so an
+ * `apiId === id` heuristic would break them. The two HF Space entries set
+ * `kieServable: false` because their `apiId` is a logical id, not a Kie model
+ * string.
+ */
+function isKieServable(m: ImageModel | VideoModel): boolean {
+  return m.kieServable !== false;
 }
 
 function kieImageBinding(m: ImageModel): ModelProviderBinding {
@@ -1730,12 +1759,13 @@ const gradioBindings: readonly ModelProviderBinding[] = [
     // are NOT contiguous (1, 2, 4); a contiguous-refs assumption would put the
     // step-count string into reference_3's image slot.
     //
-    // `canvas` is a Literal carrying BOTH resolution and ratio, so the catalog
-    // ratio cannot ride a source slot: GradioArgMap has NO valueMap, and the
-    // shared source resolver has no "duration" case. The canvas is therefore a
-    // CONSTANT (the upstream default, 1344x768 · 16:9) and the duration is the
-    // upstream default 5 — the ratio→canvas mapping needs an argMap valueMap
-    // (and a duration source) before a picker can be wired.
+    // `canvas` is a Literal carrying BOTH resolution and ratio: the catalog
+    // ratio feeds slot 5 as a SOURCE, and the argMap's valueMap translates it
+    // to the Space's literal. The constant (the upstream default,
+    // "1344x768 · 16:9 (trained)") stays as the fallback for an unmapped ratio
+    // or an absent one. The duration remains the upstream default 5 (the
+    // catalog exposes no duration picker — the source exists, but is not wired
+    // here).
     modelId: "smd-minimax-h3-ref2va-few-step",
     providerId: "hf-gradio",
     upstreamModelId: "/generate",
@@ -1749,13 +1779,24 @@ const gradioBindings: readonly ModelProviderBinding[] = [
         "1": { kind: "referenceAt", index: 0 },
         "2": { kind: "referenceAt", index: 1 },
         "4": { kind: "referenceAt", index: 2 },
+        "5": "aspectRatio",
         "7": "seed",
       },
       constants: {
         "3": "4-step",
+        // The fallback canvas — used when the ratio is absent or unmapped.
         "5": "1344x768 · 16:9 (trained)",
         "6": 5,
         "8": false,
+      },
+      valueMap: {
+        "5": {
+          "16:9": "1344x768 · 16:9 (trained)",
+          "9:16": "768x1344 · 9:16",
+          "1:1": "768x768 · 1:1",
+          "4:3": "1024x768 · 4:3",
+          "3:4": "768x1024 · 3:4",
+        },
       },
       fileInputs: ["1", "2", "4"],
     },
@@ -1763,17 +1804,22 @@ const gradioBindings: readonly ModelProviderBinding[] = [
 ];
 
 /**
- * C1 static binding set: 21 image models + 21 video models, each with a Kie
+ * C1 static binding set: every Kie-SERVABLE image/video model with a Kie
  * binding (`upstreamModelId = apiId`), plus Azure and Codex for `gpt-image-2`,
  * OpenRouter for the 19 SHIP image models and the 12 swept VIDEO models,
  * Pollinations for the 11 SHIP image models, and the four P7b `hf-gradio`
- * Space bindings (two original + two operator-supplied Spaces).
+ * Space bindings (two original + two operator-supplied Spaces). The two
+ * Space-only catalog entries (`kieServable: false`) deliberately get NO Kie
+ * binding.
  * Immutable by convention — merge copies for overrides (the registry never
  * mutates these).
  */
 export const BUILT_IN_BINDINGS: readonly ModelProviderBinding[] = [
-  ...IMAGE_MODELS.map(kieImageBinding),
-  ...VIDEO_MODELS.map(kieVideoBinding),
+  // Only Kie-SERVABLE catalog models get the generic Kie binding. A Space-only
+  // entry (`kieServable: false`) would otherwise claim a backend that cannot
+  // serve it and win the client's `bindingsByModel[0]` default.
+  ...IMAGE_MODELS.filter(isKieServable).map(kieImageBinding),
+  ...VIDEO_MODELS.filter(isKieServable).map(kieVideoBinding),
   ...(gptImage2AzureBinding ? [gptImage2AzureBinding] : []),
   ...(gptImage2CodexBinding ? [gptImage2CodexBinding] : []),
   ...openRouterImageBindings,
@@ -1782,14 +1828,23 @@ export const BUILT_IN_BINDINGS: readonly ModelProviderBinding[] = [
   ...gradioBindings,
 ];
 
-const DEFAULT_BINDINGS = new Map<string, ModelProviderBinding>(
-  BUILT_IN_BINDINGS.filter((b) => b.providerId === "kie").map((b) => [b.modelId, b]),
-);
+const DEFAULT_BINDINGS = new Map<string, ModelProviderBinding>();
+// Kie first — the historical default. Then the FIRST static binding of a model
+// that has NO Kie binding (a Space-only entry) so the default rule never
+// claims a backend that cannot serve it.
+for (const b of BUILT_IN_BINDINGS) {
+  if (b.providerId === "kie") DEFAULT_BINDINGS.set(b.modelId, b);
+}
+for (const b of BUILT_IN_BINDINGS) {
+  if (!DEFAULT_BINDINGS.has(b.modelId)) DEFAULT_BINDINGS.set(b.modelId, b);
+}
 
 /**
  * C1 default-binding rule: with no `model_bindings` row marking an active
- * provider, the active provider is `"kie"` with the static binding above
- * (preserves `lib/providers.ts`'s `?? "kie"` default).
+ * provider, the active provider is `"kie"` with its static binding when the
+ * model is Kie-servable (preserves `lib/providers.ts`'s `?? "kie"` default).
+ * A Space-only model has no Kie binding, so it defaults to its first static
+ * binding (`hf-gradio`) instead of claiming Kie.
  *
  * Throws for ids outside the catalog — registering custom LOGICAL models is
  * explicitly out of scope (design §1.2/C6); unknown id ⇒ programming error.
@@ -1806,20 +1861,23 @@ export function getDefaultBinding(modelId: string): ModelProviderBinding {
 }
 
 /**
- * Providers selectable for `modelId` from STATIC data: `{"kie"} ∪ {providers
- * of built-in bindings}` — never empty (C1.2), so a selector renders at ≥2 for
- * `gpt-image-2` exactly as before. With the OpenRouter + Pollinations image
- * bindings this yields `kie + openrouter` / `kie + pollinations` (plus
- * `azure`/`codex` for `gpt-image-2`). Stored `model_bindings` rows are unioned
- * in server-side by `GET /api/settings/providers` (`bindingsByModel`); this
- * module cannot see them (hedge (d) — pure, no DB).
+ * Providers selectable for `modelId` from STATIC data — the providers of the
+ * model's built-in bindings, in binding order (Kie first for every Kie-served
+ * model, because the Kie bindings head `BUILT_IN_BINDINGS`). A Space-only
+ * model therefore yields `["hf-gradio"]`, never a Kie claim.
+ *
+ * The historical "never empty" fallback is preserved for an id the catalog
+ * does not know (`["kie"]`, C1.2); the settings route guards that case and
+ * uses stored rows instead for custom models. Stored `model_bindings` rows are
+ * unioned in server-side by `GET /api/settings/providers` (`bindingsByModel`);
+ * this module cannot see them (hedge (d) — pure, no DB).
  */
 export function getAvailableProvidersForModel(modelId: string): ProviderId[] {
-  const out: ProviderId[] = ["kie"];
+  const out: ProviderId[] = [];
   for (const b of BUILT_IN_BINDINGS) {
-    if (b.modelId === modelId && b.providerId !== "kie") out.push(b.providerId);
+    if (b.modelId === modelId && !out.includes(b.providerId)) out.push(b.providerId);
   }
-  return out;
+  return out.length > 0 ? out : ["kie"];
 }
 
 /**

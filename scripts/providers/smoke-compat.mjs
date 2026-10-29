@@ -194,7 +194,10 @@ async function main() {
   const bindingsMod = await import(pathToFileURL(join(ROOT, "lib/providers/bindings.ts")).href);
   const typesMod = await import(pathToFileURL(join(ROOT, "lib/providers/types.ts")).href);
   const stagerMod = await import(pathToFileURL(join(ROOT, "lib/providers/mediaStager.ts")).href);
+  const sourcesMod = await import(pathToFileURL(join(ROOT, "lib/providers/adapters/sources.ts")).href);
   const modelConfig = await import(pathToFileURL(join(ROOT, "lib/modelConfig.ts")).href);
+
+  const { resolveFieldValue } = sourcesMod;
 
   const {
     BUILT_IN_BINDINGS,
@@ -1303,6 +1306,112 @@ async function main() {
   eq("the route's duration", routeBody.duration, 5);
   eq("the route's aspect ratio", routeBody.aspect_ratio, "16:9");
   eq("the route's prompt", routeBody.prompt, "a lighthouse in a storm");
+
+  // ── 14. Shared source resolver — the declared VIDEO sources ────────────────
+  // "duration"/"sound" are declared CompatFieldSources; a binding that maps
+  // one must get the value, never `undefined` (a vanished field / a null
+  // positional slot). "frames"/"inputReferences" are typed-OBJECT sources the
+  // shared scalar/array union cannot carry — they fail LOUDLY.
+  section("shared source resolver — duration/sound resolve, frames/inputReferences fail loudly");
+  eq(
+    "duration resolves the numeric clip length",
+    resolveFieldValue("duration", videoInput),
+    6,
+  );
+  eq(
+    "duration rejects a non-number (never coerced)",
+    resolveFieldValue("duration", { ...videoInput, params: { ...videoInput.params, duration: "6" } }),
+    undefined,
+  );
+  eq(
+    "sound resolves boolean false (not undefined)",
+    resolveFieldValue("sound", videoInput),
+    false,
+  );
+  eq(
+    "sound rejects a non-boolean (never coerced)",
+    resolveFieldValue("sound", { ...videoInput, params: { ...videoInput.params, sound: "false" } }),
+    undefined,
+  );
+
+  // The compat VIDEO body maps both through its own dialect switch — the
+  // declared sources must not vanish from the request.
+  capturedCalls.length = 0;
+  await quiet(() => orProvider.submit(videoInput));
+  const sourceBody = JSON.parse(String(capturedCalls[0]?.init?.body ?? "{}"));
+  eq("a compat video binding mapping duration sends it", sourceBody.duration, 6);
+  eq("a compat video binding mapping sound sends generate_audio", sourceBody.generate_audio, false);
+
+  // The two typed-object sources cannot be a scalar/array value — a mapping
+  // must FAIL, never silently drop the field.
+  let framesError = "";
+  try {
+    resolveFieldValue("frames", videoInput);
+  } catch (err) {
+    framesError = err?.message ?? String(err);
+  }
+  ok(
+    'a mapped "frames" source fails loudly',
+    framesError.includes('"frames"') && framesError.includes("not implemented"),
+    framesError,
+  );
+  let inputRefsError = "";
+  try {
+    resolveFieldValue("inputReferences", videoInput);
+  } catch (err) {
+    inputRefsError = err?.message ?? String(err);
+  }
+  ok(
+    'a mapped "inputReferences" source fails loudly',
+    inputRefsError.includes('"inputReferences"') && inputRefsError.includes("not implemented"),
+    inputRefsError,
+  );
+
+  // Adapter-level: an image binding that maps "frames" fails the submit BEFORE
+  // any upstream request is made (no silent field drop).
+  capturedCalls.length = 0;
+  let mappedSourceError = "";
+  try {
+    await quiet(() =>
+      orProvider.submit({
+        ...baseInput,
+        binding: {
+          ...nb2,
+          paramMap: { ...nb2.paramMap, fields: { ...nb2.paramMap.fields, frames: "frames" } },
+        },
+      }),
+    );
+  } catch (err) {
+    mappedSourceError = err?.message ?? String(err);
+  }
+  ok(
+    "a compat binding that maps an unimplemented source fails the submit",
+    mappedSourceError.includes('"frames"') && mappedSourceError.includes("not implemented"),
+    mappedSourceError,
+  );
+  eq("...and no upstream request was made", capturedCalls.length, 0);
+
+  // ── 15. Space-only models — the report never claims Kie ───────────────────
+  section("Space-only models — report bindingsByModel");
+  const spaceReport = await (await route.GET()).json();
+  eq(
+    "the report's bindingsByModel for moss is hf-gradio alone",
+    spaceReport.bindingsByModel?.["moss-image-8-step-dmd"],
+    ["hf-gradio"],
+  );
+  eq(
+    "the report's bindingsByModel for ref2va is hf-gradio alone",
+    spaceReport.bindingsByModel?.["smd-minimax-h3-ref2va-few-step"],
+    ["hf-gradio"],
+  );
+  ok(
+    "the moss static union no longer contains kie",
+    !getAvailableProvidersForModel("moss-image-8-step-dmd").includes("kie"),
+  );
+  ok(
+    "the report carries no modelPrefs entry for moss",
+    !("moss-image-8-step-dmd" in (spaceReport.modelPrefs ?? {})),
+  );
 
   // ── Live step (opt-in) ────────────────────────────────────────────────────
   section("live step");

@@ -151,3 +151,18 @@ healthy), never as a network error.
    version) come from deepwiki at handshake-only depth — a sessionful server
    (one that issues `Mcp-Session-Id`) remains to be exercised in step 4's
    fixtures, replayed offline from a captured frame like any other wire shape.
+
+## Addendum — the `tools/call` capture (P7c, 2026-10-29)
+
+`docs/fixtures/phase7/deepwiki-tools-call.txt` is a **real capture, not
+synthesized**: one `tools/call` (`read_wiki_structure`, `repoName:
+"facebook/react"`) against `https://mcp.deepwiki.com/mcp` on the same day,
+HTTP 200 `text/event-stream`, no `Mcp-Session-Id` issued. It post-dates the
+"handshake-only" scope above — the generic MCP leg was later exercised one step
+further to freeze the tool-result envelope (`content[]` text +
+`structuredContent`, `isError:false`) that `smoke-mcp.mjs` replays byte-exact.
+No generation endpoint was called and no ZeroGPU quota was spent. It is a
+text-only success (no media), which is exactly the loud `no media in tool
+result (content types: text)` case the adapter must settle rather than a silent
+empty success.
+

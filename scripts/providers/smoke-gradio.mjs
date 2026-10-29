@@ -524,6 +524,95 @@ async function main() {
   // A short video whose file URL is token-gated could never be mirrored by
   // the settle funnel's headerless fetch — that is WHY the bytes are inlined.
 
+  // ── 7b. POLL — the ORIGIN PIN (plan §f, review blocker on 7177592) ─────────
+  section("poll — a file URL on a foreign origin is a LOUD error, never a target");
+  const FOREIGN_URL = "https://attacker.example/x.png";
+
+  // PUBLIC variant: no token — the foreign URL must never reach mediaUrls.
+  stubbedResponse = (url) => {
+    if (url === metaZ.statusUrl) {
+      return sseFrames([{ event: "complete", data: [{ path: "/tmp/gradio/out.png", url: FOREIGN_URL }] }]);
+    }
+    return fakeResponse({}, { status: 404, ok: false });
+  };
+  capturedCalls.length = 0;
+  const foreignPublic = await gradioProvider.poll("evt-9f7a", "image", credentials, metaZ);
+  ok(
+    "a complete frame with a foreign-origin url settles error (public path)",
+    foreignPublic.state === "error" &&
+      foreignPublic.error?.includes("foreign origin") &&
+      foreignPublic.error?.includes(FOREIGN_URL),
+    JSON.stringify(foreignPublic),
+  );
+  ok(
+    "no request was ever made to the foreign origin (public path)",
+    !capturedCalls.some((c) => c.url.includes("attacker.example")),
+    JSON.stringify(capturedCalls.map((c) => c.url)),
+  );
+  eq(
+    "the settle funnel is NEVER handed a foreign host (mediaUrls stays empty)",
+    JSON.stringify(foreignPublic.mediaUrls ?? null),
+    "null",
+  );
+
+  // PRIVATE variant: token present — assert on capturedCalls, not just the
+  // outcome: the bearer token must never ride ANY foreign host.
+  capturedCalls.length = 0;
+  const foreignPrivate = await gradioProvider.poll(
+    "evt-9f7a",
+    "image",
+    { ...credentials, apiKey: "hf-smoke-token" },
+    metaZ,
+  );
+  ok(
+    "a complete frame with a foreign-origin url settles error (private path)",
+    foreignPrivate.state === "error" && foreignPrivate.error?.includes(FOREIGN_URL),
+    JSON.stringify(foreignPrivate),
+  );
+  ok(
+    "the bearer token was never sent to the foreign host (no call, no exfil)",
+    !capturedCalls.some((c) => c.url.includes("attacker.example")),
+    JSON.stringify(capturedCalls.map((c) => c.url)),
+  );
+  ok(
+    "every Authorization-bearing call rides the pinned origin only",
+    capturedCalls
+      .filter((c) => String(c.init?.headers?.Authorization ?? "").startsWith("Bearer"))
+      .every((c) => new URL(c.url).origin === new URL(metaZ.statusUrl).origin),
+    JSON.stringify(capturedCalls.map((c) => c.url)),
+  );
+
+  // A 302 on the status endpoint: redirect:"error" pins it (transient throw,
+  // no follow-up to the Location target).
+  stubbedResponse = (url) => {
+    if (url === metaZ.statusUrl) {
+      return new Response("", {
+        status: 302,
+        statusText: "Found",
+        headers: { location: "https://attacker.example/stream" },
+      });
+    }
+    return fakeResponse({}, { status: 404, ok: false });
+  };
+  capturedCalls.length = 0;
+  let redirectError = "";
+  try {
+    await gradioProvider.poll("evt-9f7a", "image", { ...credentials, apiKey: "hf-smoke-token" }, metaZ);
+  } catch (err) {
+    redirectError = err?.message ?? String(err);
+  }
+  ok(
+    "a 302 status endpoint is NOT followed to its Location",
+    redirectError.includes("(302)") &&
+      !capturedCalls.some((c) => c.url.includes("attacker.example")),
+    JSON.stringify({ redirectError, calls: capturedCalls.map((c) => c.url) }),
+  );
+  eq(
+    "the status fetch passes redirect:\"error\" to the pinned origin",
+    capturedCalls[0]?.init?.redirect,
+    "error",
+  );
+
   // ── 8. POLL — pending variants ─────────────────────────────────────────────
   section("poll — keepalive shapes stay pending");
   stubbedResponse = () =>

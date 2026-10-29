@@ -333,16 +333,69 @@ function firstFileData(payload: unknown): { path?: string; url?: string } | null
   return null;
 }
 
-/** A Space-relative file path → its absolute `/gradio_api/file=` URL. */
-function fileUrlOf(baseUrl: string, entry: { path?: string; url?: string }): string | null {
-  if (entry.url && /^https?:\/\//i.test(entry.url)) return entry.url;
-  if (entry.path) {
-    if (/^https?:\/\//i.test(entry.path)) return entry.path;
+/**
+ * The ORIGIN-SECURITY model (plan §f / review blocker on 7177592):
+ *
+ * A file reference handed to the settle funnel — or fetched HERE with the
+ * user's bearer token — must point at the Space we pinned (the statusUrl's
+ * origin). An absolute URL on ANY other host is a foreign-protocol escape:
+ *
+ *  - PRIVATE path: the in-adapter byte fetch carries `Authorization: Bearer
+ *    <hf_token>` — a foreign url in the payload would exfiltrate the token.
+ *  - PUBLIC path: the URL rides `mediaUrls` into the settle funnel's
+ *    headerless fetch (no host validation, follows redirects) — a foreign
+ *    url would be adapter-introduced SSRF.
+ *
+ * So `fileUrlOf` validates every absolute candidate against `origin`:
+ * http(s)-only, NO userinfo (`user:pass@` hosts ride on `origin` anyway, and
+ * the URL-parser result is still rejected), pin-scheme-or-nothing. A
+ * candidate that fails ANY of these is reported as a DISTINCT `foreign`
+ * outcome (never silently dropped, never silently used) so the caller can
+ * settle a loud error. A path-shaped reference (`/tmp/gradio/…`) builds its
+ * URL on the pinned origin by construction.
+ */
+type FileUrlResolution =
+  | { outcome: "resolved"; url: string }
+  | { outcome: "foreign"; candidate: string }
+  | { outcome: "missing" };
+
+/** http(s), no userinfo, origin === pinned origin. Everything else is "no". */
+function sameOriginSafe(candidate: string, origin: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+  if (parsed.username || parsed.password) return false;
+  return parsed.origin === origin;
+}
+
+function fileUrlOf(origin: string, entry: { path?: string; url?: string }): FileUrlResolution {
+  let foreign: string | undefined;
+  let relative: string | undefined;
+  for (const raw of [entry?.url, entry?.path]) {
+    const candidate = typeof raw === "string" ? raw.trim() : "";
+    if (!candidate) continue;
+    if (/^(https?:)?\/\//i.test(candidate)) {
+      if (sameOriginSafe(candidate, origin)) {
+        return { outcome: "resolved", url: candidate };
+      }
+      // Keep scanning — a later pin-safe path does NOT launder a foreign URL
+      // into a resolved outcome; foreign wins when we reach the end.
+      foreign ??= candidate;
+      continue;
+    }
+    relative ??= candidate;
+  }
+  if (foreign) return { outcome: "foreign", candidate: foreign };
+  if (relative) {
     // The path is the ABSOLUTE upstream file path (e.g. "/tmp/gradio/…") and
     // rides VERBATIM after "file=" — Gradio's wire form never strips it.
-    return `${baseUrl}/gradio_api/file=${entry.path}`;
+    return { outcome: "resolved", url: `${origin}/gradio_api/file=${relative}` };
   }
-  return null;
+  return { outcome: "missing" };
 }
 
 /** The message of an upstream `event: error` frame. */
@@ -391,6 +444,11 @@ async function pollWind(
   const res = await fetch(statusUrl, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     signal: AbortSignal.timeout(POLL_TICK_TIMEOUT_MS),
+    // A 30x from the pinned origin must NOT be followed: the Location target
+    // would inherit this tick's Authorization header (and the next tick's)
+    // without ever being pinned. redirect:"error" makes any redirect a
+    // transient throw — the job loop retries, the Space self-heals or fails.
+    redirect: "error",
   });
   if (!res.ok) {
     // A non-SSE status answer is a transport-level failure — transient: the
@@ -419,11 +477,33 @@ async function pollWind(
             throw new Error(`hf-gradio complete frame carried non-JSON: ${frame.data.slice(0, 200)}`);
           }
           const entry = firstFileData(payload);
-          const fileUrl = entry && fileUrlOf(origin, entry);
-          if (!fileUrl) {
+          if (!entry) {
             // A completed job with no file entry — settle empty rather than
             // hang (the upstream said complete).
             return { state: "error", error: "hf-gradio: the Space completed without a file payload." };
+          }
+          const resolution = fileUrlOf(origin, entry);
+          if (resolution.outcome === "foreign") {
+            return {
+              state: "error",
+              error:
+                `hf-gradio: the Space returned a file URL on a foreign origin ` +
+                `(${resolution.candidate} != ${origin}). No request was made.`,
+            };
+          }
+          if (resolution.outcome === "missing") {
+            return { state: "error", error: "hf-gradio: the Space completed without a resolvable file URL." };
+          }
+          const fileUrl = resolution.url;
+          // Defense in depth: re-validate BEFORE any fetch ever carries the
+          // bearer token (do not rely on fileUrlOf alone).
+          if (!sameOriginSafe(fileUrl, origin)) {
+            return {
+              state: "error",
+              error:
+                `hf-gradio: the Space returned a file URL on a foreign origin ` +
+                `(${fileUrl} != ${origin}). No request was made.`,
+            };
           }
           if (!token) {
             // PUBLIC Space: the URL is fetchable by anyone — settle With it
@@ -438,6 +518,7 @@ async function pollWind(
             const fileRes = await fetch(fileUrl, {
               headers: { Authorization: `Bearer ${token}` },
               signal: AbortSignal.timeout(POLL_TICK_TIMEOUT_MS),
+              redirect: "error",
             });
             if (!fileRes.ok) {
               // Not ready yet / hiccup — keep the task alive for the next tick.

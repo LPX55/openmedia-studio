@@ -1063,11 +1063,14 @@ async function main() {
       { type: "audio_url", audio_url: { url: "https://example.com/voice.mp3" } },
     ],
   );
-  ok("the video body has no generate_audio (the model has no audio)", vBody.generate_audio === undefined);
+  // seedance declares generate_audio per-model (sound:false retries a clip the
+  // upstream audio-copyright policy rejected; a83481e, verified live) — the
+  // catalog's sound toggle must ride the body.
+  eq("generate_audio rides the declared field (sound:false video-only clip)", vBody.generate_audio, false);
   ok(
     "the video body carries no unexpected field",
     Object.keys(vBody).every((k) =>
-      ["model", "prompt", "duration", "resolution", "aspect_ratio", "seed", "frame_images", "input_references"].includes(k),
+      ["model", "prompt", "duration", "resolution", "aspect_ratio", "seed", "generate_audio", "frame_images", "input_references"].includes(k),
     ),
     JSON.stringify(Object.keys(vBody)),
   );

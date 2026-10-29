@@ -1023,6 +1023,10 @@ export const mcpProvider: GenerationProvider = {
     // uploadMedia() is implemented (reachable only under "remote-url").
     mediaUpload: true,
     mediaStaging: "data-url",
+    // P7a-4: the server may be local (localhost:8080/mcp) or on the LAN, so a
+    // binding may ask for private-host passthrough. A cloud MCP server loses
+    // nothing: the AND in createStagingResolver keeps its own pinned rule.
+    allowPrivateUrl: true,
     // V1 is images only; the video route refuses the request.
     video: false,
   },

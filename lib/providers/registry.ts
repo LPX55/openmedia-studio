@@ -22,6 +22,50 @@ import type { GenerationProvider, ProviderId, ProviderRuntimeConfig } from "./ty
 
 const providers = new Map<ProviderId, GenerationProvider>();
 
+// ── Family / kind routing (P7a-0) ────────────────────────────────────────────
+//
+// `register()` can only know the ids its adapter declares at load time, so a
+// USER-CREATED backend id (`hf-mflux`, `mcp-lan-1`, …) is never a Map key.
+// Its `provider_configs.extra_json.kind` names the FAMILY it belongs to, and
+// the family adapter serves it as an id-overridden view — exactly the shape
+// `register()` builds for a declared alias.
+
+/**
+ * The provider FAMILY a backend belongs to, stored in
+ * `provider_configs.extra_json.kind` (P7a-0).
+ *
+ * `openai-compat` is the default: every backend created before the field
+ * existed was an OpenAI-speaking endpoint. `gradio` / `mcp` are the Phase-7
+ * families (`hf-gradio` / `mcp` adapters).
+ */
+export type ProviderKind = "openai-compat" | "gradio" | "mcp";
+
+/** The accepted `kind` values (PUT validation + report defaults). */
+export const PROVIDER_KINDS = ["openai-compat", "gradio", "mcp"] as const;
+
+/** kind → the registered FAMILY adapter id that serves it (P7a-0). */
+const FAMILY_ADAPTER_BY_KIND: Record<ProviderKind, ProviderId> = {
+  "openai-compat": "openai-compat",
+  gradio: "hf-gradio",
+  mcp: "mcp",
+};
+
+/**
+ * The family kind stored on a provider row (`extra_json.kind`).
+ *
+ * Absent/empty ⇒ `"openai-compat"` (the historical default). An UNRECOGNIZED
+ * non-empty value returns `null`: routing must fail loudly instead of guessing
+ * a dialect. (`PUT /api/settings/providers` validates the field, so only a
+ * hand-edited row can get here.)
+ */
+export function providerKindOf(config: Pick<ProviderRuntimeConfig, "extra">): ProviderKind | null {
+  const raw = config.extra.kind;
+  if (raw === undefined || raw === null || raw === "") return "openai-compat";
+  return typeof raw === "string" && (PROVIDER_KINDS as readonly string[]).includes(raw)
+    ? (raw as ProviderKind)
+    : null;
+}
+
 /**
  * Registers (or replaces, e.g. on hot-reload) the adapter for its `id`.
  *
@@ -40,6 +84,37 @@ export function register(provider: GenerationProvider): void {
 /** The registered adapter, or `undefined` when no adapter has registered for `providerId` yet. */
 export function get(providerId: ProviderId): GenerationProvider | undefined {
   return providers.get(providerId);
+}
+
+/**
+ * Resolve the adapter for a BACKEND id, including user-created backends
+ * (P7a-0).
+ *
+ *   1. an EXACT registration wins — every built-in id and every declared alias
+ *      behaves exactly as `get()` did before this hook existed;
+ *   2. otherwise the row's `extra_json.kind` names its FAMILY and the family
+ *      adapter (already registered) is served as an ID-OVERRIDDEN VIEW, the
+ *      same shape `register()` stores for an alias: `provider.id` stays the
+ *      BACKEND id, which is what the job manager uses for credential
+ *      resolution and `generations.provider_id`;
+ *   3. otherwise `undefined` — the caller (`resolveForModel`) fails loudly.
+ *
+ * `config` is optional so callers that already read the runtime config can
+ * hand it over instead of triggering a second lookup.
+ */
+export function resolveProviderFor(
+  providerId: ProviderId,
+  config?: ProviderRuntimeConfig,
+): GenerationProvider | undefined {
+  const exact = providers.get(providerId);
+  if (exact) return exact;
+
+  const cfg = config ?? getProviderRuntimeConfig(providerId);
+  const kind = providerKindOf(cfg);
+  if (!kind) return undefined;
+  const family = providers.get(FAMILY_ADAPTER_BY_KIND[kind]);
+  if (!family) return undefined;
+  return { ...family, id: providerId };
 }
 
 /**
@@ -105,7 +180,9 @@ function resolvePresetId(
  *
  * Throws when: the model id is unknown (custom logical models are out of scope,
  * C6), no static binding AND no usable row exist for the pair, the merged
- * binding lacks `upstreamModelId`, or no adapter has registered yet (P4b).
+ * binding lacks `upstreamModelId`, or no adapter can be resolved for the id —
+ * neither an exact registration nor a registered FAMILY adapter for the row's
+ * `extra_json.kind` (P7a-0; see `resolveProviderFor`).
  */
 export function resolveForModel(
   modelId: string,
@@ -145,14 +222,19 @@ export function resolveForModel(
     throw new Error(`resolveForModel: binding for (model "${modelId}", provider "${providerId}") has no upstreamModelId`);
   }
 
-  const provider = get(providerId);
+  // Runtime config first: the family routing hook below needs `extra_json.kind`,
+  // and the preset layer needs the same row (one read, not two).
+  const config = getProviderRuntimeConfig(providerId);
+  const provider = resolveProviderFor(providerId, config);
   if (!provider) {
+    const kind = providerKindOf(config);
+    const hint = kind
+      ? ` — no family adapter "${FAMILY_ADAPTER_BY_KIND[kind]}" is registered for kind "${kind}"`
+      : ` — its provider_configs row carries an unrecognized kind "${String(config.extra.kind)}"`;
     throw new Error(
-      `resolveForModel: provider "${providerId}" is not registered — adapters register in P4b (lib/providers/adapters/*)`,
+      `resolveForModel: provider "${providerId}" is not registered — adapters register in P4b (lib/providers/adapters/*)${hint}`,
     );
   }
-
-  const config = getProviderRuntimeConfig(providerId);
 
   // ── Param preset layer (compat-plan §c) ───────────────────────────────────
   // The effective params of a compat binding are

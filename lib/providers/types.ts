@@ -173,6 +173,18 @@ export interface GenerationCapabilities {
    * unknown ⇒ allowed.
    */
   video?: boolean;
+  /**
+   * The adapter CONTACTS the backend itself from this host, so a loopback/LAN
+   * URL in the request is reachable by that backend and may pass through
+   * unstaged (local MCP server, LAN Space — P7a-4).
+   *
+   * This is an ADAPTER-level capability on purpose: a binding may ask for
+   * `allowPrivateUrl`, but a cloud adapter can never honour it. The stager
+   * ANDs the two, so the pinned o6-bullet-5 rule ("private hosts are not
+   * remote") stays byte-for-byte for every cloud family even if a stored
+   * binding sets the flag.
+   */
+  allowPrivateUrl?: boolean;
 }
 
 /**

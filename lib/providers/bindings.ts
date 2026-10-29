@@ -329,6 +329,16 @@ export interface ModelProviderBinding {
   presetError?: string;
   /** True when the binding is user-defined (`model_bindings.is_custom`). */
   isCustom?: boolean;
+  /**
+   * Ask the stager to treat loopback/LAN media URLs as reachable (P7a-4):
+   * a local MCP server or a LAN Space can fetch what a cloud provider cannot.
+   *
+   * Honoured ONLY when the resolved adapter also declares
+   * `capabilities.allowPrivateUrl` — the stager ANDs both, so a cloud family
+   * keeps the pinned "private hosts are not remote" rule even when a stored
+   * binding sets this flag. Purely data; no adapter import needed here.
+   */
+  allowPrivateUrl?: boolean;
 }
 
 /**

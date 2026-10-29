@@ -65,6 +65,20 @@ export interface StagedMediaGroup {
 export interface StagingPlan {
   strategy: MediaStagingStrategy;
   uploadMedia?: GenerationProvider["uploadMedia"];
+  /**
+   * Upload-target identity for the dedupe cache (P7a-0): the BACKEND id plus
+   * the base URL the upload will hit (a binding-pinned Space URL wins over the
+   * stored config). Two backends — or two Spaces of one family — must never
+   * share an uploaded URL.
+   */
+  uploadScope?: { providerId: string; baseUrl: string | null };
+  /**
+   * P7a-4: this staging decision may treat loopback/LAN URLs as reachable.
+   * Set ONLY when the binding asks for it AND the resolved adapter declares
+   * `capabilities.allowPrivateUrl` (the AND lives in `createStagingResolver`),
+   * so a cloud family can never inherit the relaxed rule from stored data.
+   */
+  allowPrivateUrl?: boolean;
 }
 
 /** Strategy-chain resolver handed to `stageInputMedia` — called once per input item. */
@@ -77,18 +91,29 @@ export type StagingChainResolver = (kind: MediaKind) => StagingPlan;
  * The BINDING is handed to the upload hook as its 4th argument: an
  * openai-compat backend uploads to the media store its binding names (the
  * endpoint is part of the dialect, not of the adapter).
+ *
+ * The plan also carries the UPLOAD SCOPE (backend id + effective base URL) so
+ * the process-wide upload cache never reuses backend A's URL for backend B.
  */
 export function createStagingResolver(
   operation: MediaStagingOperation,
   binding: ModelProviderBinding | undefined,
-  provider: Pick<GenerationProvider, "mediaStaging" | "uploadMedia">,
+  provider: Pick<GenerationProvider, "id" | "mediaStaging" | "uploadMedia" | "capabilities">,
 ): StagingChainResolver {
   const upload = provider.uploadMedia;
+  const uploadScope = { providerId: String(provider.id), baseUrl: binding?.baseUrl ?? null };
+  // P7a-4: the binding ASKS, the adapter must also DECLARE. A stored binding
+  // can therefore never relax the private-host rule for a cloud family.
+  const allowPrivateUrl = Boolean(
+    binding?.allowPrivateUrl && provider.capabilities?.allowPrivateUrl,
+  );
   return () => ({
     strategy: resolveMediaStagingStrategy(operation, binding, provider.mediaStaging),
     uploadMedia: upload
       ? (raw, mimeType, cfg) => upload.call(provider, raw, mimeType, cfg, binding)
       : undefined,
+    uploadScope,
+    allowPrivateUrl,
   });
 }
 
@@ -230,20 +255,39 @@ async function materializeDataUri(raw: string, kind: MediaKind): Promise<string>
   return filePath;
 }
 
-// Upload-dedupe cache (kieUpload.ts parity): same input uploads once per process.
+// Upload-dedupe cache (kieUpload.ts parity): same input to the SAME upload
+// target uploads once per process.
+//
+// The key MUST include the upload target (P7a-0): with kie + pollinations + N
+// gradio Spaces + M MCP servers, the raw input string alone let backend B
+// receive backend A's uploaded URL (a `/tmp/gradio/…` path handed to a Space
+// that never saw it). The scope is the BACKEND id + the base URL the upload
+// hits; a binding-pinned base URL (a Space) wins over the stored config.
 const uploadCache = new Map<string, Promise<string>>();
+
+function uploadCacheKey(
+  raw: string,
+  cfg: ProviderRuntimeConfig,
+  scope: StagingPlan["uploadScope"],
+): string {
+  const providerId = scope?.providerId ?? String(cfg.providerId);
+  const baseUrl = scope?.baseUrl ?? cfg.baseUrl ?? "";
+  return `${providerId}\n${baseUrl}\n${raw}`;
+}
 
 function cachedUpload(
   raw: string,
   mimeType: string,
   uploadMedia: NonNullable<GenerationProvider["uploadMedia"]>,
   cfg: ProviderRuntimeConfig,
+  scope: StagingPlan["uploadScope"],
 ): Promise<string> {
-  let pending = uploadCache.get(raw);
+  const key = uploadCacheKey(raw, cfg, scope);
+  let pending = uploadCache.get(key);
   if (!pending) {
     pending = uploadMedia(raw, mimeType, cfg);
-    uploadCache.set(raw, pending);
-    void pending.catch(() => uploadCache.delete(raw)); // don't cache failures
+    uploadCache.set(key, pending);
+    void pending.catch(() => uploadCache.delete(key)); // don't cache failures
   }
   return pending;
 }
@@ -263,7 +307,13 @@ async function stageOne(
   // alone. Loopback/private hosts are EXCLUDED (o6 bullet 5) — they fall into
   // the strategy below so they get re-hosted / fetched instead of handed to an
   // upstream that can't reach them.
-  if (REMOTE_RE.test(raw) && !isPrivateHostUrl(raw)) return { ...base, url: raw };
+  //
+  // P7a-4 exception: when the adapter BOTH declares `allowPrivateUrl` and the
+  // binding asks for it, the backend can reach the private host itself, so the
+  // URL passes through untouched (re-hosting a LAN Space's own asset into a
+  // different store would be the wrong move). Cloud families never reach here
+  // with the flag set — the AND lives in `createStagingResolver`.
+  if (REMOTE_RE.test(raw) && (!isPrivateHostUrl(raw) || plan.allowPrivateUrl)) return { ...base, url: raw };
 
   const isData = raw.startsWith("data:");
   const isLocal = isData || raw.startsWith("/generated/");
@@ -313,7 +363,7 @@ async function stageOne(
         );
       }
       const mimeType = mimeOf(raw, kind);
-      const url = await cachedUpload(raw, mimeType, plan.uploadMedia, cfg);
+      const url = await cachedUpload(raw, mimeType, plan.uploadMedia, cfg, plan.uploadScope);
       return { ...base, url, mimeType };
     }
   }

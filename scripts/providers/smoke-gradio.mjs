@@ -132,8 +132,15 @@ let savedHfToken;
 
 const CALL_URL_BASE = "https://mrfakename-z-image-turbo.hf.space";
 
-/** A Form junction: FieldData dict carrying an uploaded Space path. */
+/**
+ * The FileData dict a slot is expected to carry. Mirrors the adapter's rule:
+ * an UPLOADED Space path rides `path` only; an absolute reference rides BOTH
+ * `path` and `url` (Gradio documents `url` as the publicly-available form).
+ */
 function fileData(path) {
+  if (/^https?:\/\//i.test(path) || path.startsWith("data:")) {
+    return { path, url: path, meta: { _type: "gradio.FileData" } };
+  }
   return { path, meta: { _type: "gradio.FileData" } };
 }
 
@@ -152,6 +159,7 @@ async function main() {
   const registryMod = await import(pathToFileURL(join(ROOT, "lib/providers/registry.ts")).href);
   const adaptersMod = await import(pathToFileURL(join(ROOT, "lib/providers/adapters/gradio.ts")).href);
   const httpSafeMod = await import(pathToFileURL(join(ROOT, "lib/providers/adapters/httpSafe.ts")).href);
+  const stagerMod = await import(pathToFileURL(join(ROOT, "lib/providers/mediaStager.ts")).href);
 
   const { BUILT_IN_BINDINGS } = bindingsMod;
   const { get, resolveForModel } = registryMod;
@@ -740,6 +748,60 @@ async function main() {
   const parsedMixed = httpSafeMod.framesFrom(mixedStream);
   eq("a mixed LF/CRLF stream parses both frames", parsedMixed.frames.length, 2);
   eq("mixed framing preserves frame order", parsedMixed.frames.map((f) => f.event).join(","), "a,b");
+
+  // ── P7a-4 — allowPrivateUrl is an ADAPTER capability, not a binding wish ──
+  section("staging — allowPrivateUrl needs BOTH the binding and the adapter");
+  const stageCfg = { providerId: "probe", apiKey: null, baseUrl: null, extra: {}, keySource: "none" };
+  const privateRef = "http://127.0.0.1:8188/view.png";
+  let uploads = 0;
+  const countingUpload = async () => {
+    uploads += 1;
+    return "https://uploaded.example/probe.png";
+  };
+  const capableAdapter = {
+    id: "hf-gradio",
+    mediaStaging: "remote-url",
+    uploadMedia: countingUpload,
+    capabilities: { allowPrivateUrl: true },
+  };
+  const cloudAdapter = {
+    id: "kie",
+    mediaStaging: "remote-url",
+    uploadMedia: countingUpload,
+    capabilities: {},
+  };
+  const askedBinding = {
+    modelId: "probe-model",
+    providerId: "hf-gradio",
+    upstreamModelId: "probe-tool",
+    allowPrivateUrl: true,
+  };
+
+  uploads = 0;
+  const passthrough = await stagerMod.stageInputMedia(
+    { references: [privateRef] },
+    stagerMod.createStagingResolver("image-edit", askedBinding, capableAdapter),
+    stageCfg,
+  );
+  eq("a capable adapter + asking binding passes the loopback URL through", passthrough.references?.[0]?.url, privateRef);
+  eq("...and never re-hosts it", uploads, 0);
+
+  uploads = 0;
+  const refused = await stagerMod.stageInputMedia(
+    { references: [privateRef] },
+    stagerMod.createStagingResolver("image-edit", { ...askedBinding, allowPrivateUrl: false }, capableAdapter),
+    stageCfg,
+  );
+  eq("a capable adapter WITHOUT the binding flag still re-hosts", uploads, 1);
+  eq("...so the staged URL is the upload target, not the private one", refused.references?.[0]?.url !== privateRef, true);
+
+  uploads = 0;
+  await stagerMod.stageInputMedia(
+    { references: [privateRef] },
+    stagerMod.createStagingResolver("image-edit", askedBinding, cloudAdapter),
+    stageCfg,
+  );
+  eq("a CLOUD adapter cannot honour the binding flag — the pinned rule survives", uploads, 1);
 
   // ── 13. READINESS ───────────────────────────────────────────────────────────
   section("readiness — base URL required, the HF token optional");

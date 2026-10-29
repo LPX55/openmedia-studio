@@ -166,3 +166,97 @@ text-only success (no media), which is exactly the loud `no media in tool
 result (content types: text)` case the adapter must settle rather than a silent
 empty success.
 
+## Operator-supplied target Spaces — `/gradio_api/info` verified 2026-10-29
+
+Three Spaces requested as high-value targets. Signatures below are the
+AUTHORITATIVE positional order read back from `/gradio_api/info` (not the
+generated client SDKs, whose keyword form hides the wire order).
+
+### `hugging-apps/moss-image-8-step-dmd` · fn `/generate` (image)
+
+base `https://hugging-apps-moss-image-8-step-dmd.hf.space`
+
+| # | Param | Type | Default |
+|---|---|---|---|
+| 0 | `prompt` | str | — (required) |
+| 1 | `height` | float | 1024 |
+| 2 | `width` | float | 1024 |
+| 3 | `num_steps` | float | 8 |
+| 4 | `seed` | int | 0 |
+| 5 | `randomize_seed` | bool | true |
+| 6 | `lora_strength` | float | 0.7 |
+
+Returns `[ImageData, seed]`. Straight image lane — note `num_steps` is a FLOAT
+and there is a `lora_strength` slot no other recorded Space has.
+
+### `hugging-apps/smd-minimax-h3-ref2va-few-step` · fn `/generate` (video)
+
+base `https://hugging-apps-smd-minimax-h3-ref2va-few-step.hf.space`
+
+| # | Param | Type | Default |
+|---|---|---|---|
+| 0 | `prompt` | str | — (required) |
+| 1 | `reference_1` | filepath | null |
+| 2 | `reference_2` | filepath | null |
+| 3 | `variant` | Literal['4-step','8-step'] | '4-step' |
+| 4 | `reference_3` | filepath | null |
+| 5 | `canvas` | Literal['1344x768 · 16:9 (trained)', '960x544 · 16:9 fast', '768x1344 · 9:16', '544x960 · 9:16 fast', '768x768 · 1:1', '1024x768 · 4:3', '768x1024 · 3:4'] | '1344x768 · 16:9 (trained)' |
+| 6 | `duration` | float | 5 |
+| 7 | `seed` | int | 42 |
+| 8 | `randomize_seed` | bool | false |
+
+Returns `[VideoData, seed]`. **`variant` sits BETWEEN `reference_2` and
+`reference_3`** — the sharpest yet "position ≠ UI order" case: a reference
+slot map that assumes refs are contiguous puts the step-count string into an
+image slot. `canvas` is a Literal carrying the resolution + ratio, so the
+ratio picker maps through a valueMap rather than width/height slots.
+
+### `prithivMLmods/FireRed-Image-Edit-1.0-Fast` · fn `/edit_image` (image edit)
+
+base `https://prithivmlmods-firered-image-edit-1-0-fast.hf.space`
+
+| # | Param | Type | Default |
+|---|---|---|---|
+| 0 | `images_b64_json` | str | — (required) |
+| 1 | `prompt` | str | — (required) |
+| 2 | `seed` | int | — |
+| 3 | `randomize_seed` | bool | — |
+| 4 | `guidance_scale` | float | — |
+| 5 | `steps` | int | — |
+
+UNRESOLVED: `images_b64_json` is a `str`, not a filepath/FileData slot, so the
+encoding (a bare base64 string? a JSON array? data URLs?) is not derivable
+from `/info` and NO default is published. It is a `data-url`-ish lane, not the
+`remote-url` upload lane, and it must NOT be bound on a guess. Also present:
+`/check_safety` (one `prompt`) and `/load_example` (one `idx`), both helpers —
+not generation paths.
+
+### Reviewed but deliberately UNBOUND — `JCisHERE/wan2-2-i2v-v3`
+
+Not bound by product decision (its `lora_groups` slot is a large adult-content
+enum; exposing that as a model param is a different call than provider
+plumbing). The doc was still worth mining for wire facts, which are recorded
+here because they constrain code we already ship:
+
+1. **A REQUIRED start+end frame pair exists in the wild.** `input_image` and
+   `last_image` are both required `Image` (FileData) slots — the first observed
+   Space where the end frame is mandatory, which is exactly what the
+   `startFrame`/`endFrame` sources were added for.
+2. **FileData is a typed record, not a bare string**:
+   `{path, url, size, orig_name, mime_type, is_stream, meta}` where `path` is a
+   *local file* and `url` is a *publicly available URL or base64 image*. Our
+   wrapper used to put public URLs in `path` only; `gradio.ts#fileDataOf` now
+   carries BOTH for absolute references (and `path` alone for an uploaded
+   `/tmp/gradio/…` path), matching `gradio_client`'s `handle_file`.
+3. **Enum-valued params recur** (`scheduler`, `frame_multiplier`; minimax's
+   `variant`/`canvas`): they need Literal constants or a `valueMap`, never a raw
+   source — the same class as the `canvas` ratio picker.
+4. **Multi-output payloads exist**: `[Video, File(Download), Seed]`. First-file
+   wins is correct for this shape, but a payload that leads with a download
+   artifact would mis-scan; the parse should prefer an entry whose extension
+   matches the requested kind. Noted, not yet implemented (no observed Space
+   exhibits it).
+5. **`seed` is typed `float` on some Spaces** — the source resolver's numeric
+   return needs no coercion.
+
+

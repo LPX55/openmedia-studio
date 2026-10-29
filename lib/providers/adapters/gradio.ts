@@ -58,7 +58,6 @@ import {
   framesFrom,
   pinnedFetch,
   sameOriginSafe,
-  type SseFrame,
 } from "./httpSafe";
 
 /** The whole submit shares one budget (mirrors openaiCompat's bounded POST). */
@@ -127,7 +126,16 @@ function normalizeFn(raw: string): string {
  * The Gradio FileData dict for one file slot — the shape a `/gradio_api/upload`
  * path (or a public media URL) rides in, verified on the positional dialect.
  */
-function fileDataOf(value: string): { path: string; meta: { _type: string } } {
+function fileDataOf(value: string): { path: string | null; url?: string; meta: { _type: string } } {
+  // Gradio's FileData distinguishes a LOCAL upload path (`path` — the
+  // /tmp/gradio/… string our uploadMedia returns) from a PUBLIC reference
+  // (`url` — documented as "publicly available url or base64 encoded image").
+  // An absolute reference rides BOTH, mirroring gradio_client's handle_file:
+  // a Space that validates the slot type then sees a URL where it expects one,
+  // and a Space that only reads `path` keeps working.
+  if (/^https?:\/\//i.test(value) || value.startsWith("data:")) {
+    return { path: value, url: value, meta: { _type: "gradio.FileData" } };
+  }
   return { path: value, meta: { _type: "gradio.FileData" } };
 }
 
@@ -626,6 +634,9 @@ export const gradioProvider: GenerationProvider = {
     mediaUpload: true, // the required uploadMedia hook of "remote-url"
     mediaStaging: "remote-url",
     video: true, // wan2-1-fast is a video Space
+    // P7a-4: the Space IS the backend — a LAN/loopback Space can fetch its own
+    // private assets, so a binding may ask for private-host passthrough.
+    allowPrivateUrl: true,
   },
 
   /**

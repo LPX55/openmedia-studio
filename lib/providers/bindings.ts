@@ -59,6 +59,22 @@ export type VideoPayloadFamily =
  *  - "frames"          — the staged start/end frames → `frame_images`
  *  - "inputReferences" — the staged references / videos / audios →
  *                        `input_references`
+ *
+ * P7b single-file slots (plan rev-2, spike-fed — `docs/provider-phase7-spike.md`):
+ * the compat sources above are list-shaped; the Recorded Space signatures need
+ * ONE positional file slot (`wan2-1-fast` data[0] `input_image`, FLUX.1-Kontext
+ * `input_image`, ltx-video `input_image_filepath` / `input_video_filepath`), so
+ * the union gains the isolated variants:
+ *
+ *  - "startFrame" — the staged start frame ALONE (one slot, not the pair)
+ *  - "endFrame"   — the staged end frame ALONE
+ *  - "videoRef"   — the staged reference video ALONE
+ *  - { kind: "referenceAt", index } — ONE item of the staged reference list,
+ *                     by 0-based index (`ReferenceAtSource`, below)
+ *
+ * The variants are resolved in the SHARED resolver (`adapters/sources.ts`) —
+ * never re-invented per adapter — and a compat binding that never references
+ * them keeps byte-identical request bodies (smoke-compat is the guard).
  */
 export type CompatFieldSource =
   | "prompt"
@@ -75,7 +91,57 @@ export type CompatFieldSource =
   | "duration"
   | "sound"
   | "frames"
-  | "inputReferences";
+  | "inputReferences"
+  // P7b single-file slots — resolved in the shared resolver (adapters/sources.ts).
+  | "startFrame"
+  | "endFrame"
+  | "videoRef"
+  | ReferenceAtSource;
+
+/**
+ * ONE item of the staged reference list, by 0-based index — the parameterized
+ * variant of the source union (`referenceAt`). A bare source-string union
+ * cannot carry an argument, so this is an object member.
+ */
+export interface ReferenceAtSource {
+  kind: "referenceAt";
+  /** 0-based index into the staged reference list. */
+  index: number;
+}
+
+/**
+ * The DIALECT of an `hf-gradio` binding (P7b) — the positional shape of the
+ * Space's queued call (`POST /gradio_api/call/{fn}`, spike-verified:
+ * `docs/provider-phase7-spike.md`).
+ *
+ * A Space call takes a REQUIRED positional `data[]` array whose order is the
+ * authoritative `/gradio_api/info` parameter order — NOT the UI order, and
+ * NOT another Space's order (Z-Image-Turbo ships `seed` at index 4,
+ * FLUX.1-schnell at index 1). The map therefore keys by the data[] INDEX:
+ *
+ *  - `sources`    — index (string key) → normalized source (the shared union
+ *                   above; a single-file slot for a file position).
+ *  - `constants`  — index → static upstream value (the spike's recorded
+ *                   defaults/caps for a model whose pickers land with P7a-1 —
+ *                   height/width/steps/flags).
+ *  - `fileInputs` — indices whose value is a STAGED media → the adapter wraps
+ *                   the resolved string into `{"path": <value>, "meta":
+ *                   {"_type": "gradio.FileData"}}` (the uploaded /tmp/gradio
+ *                   path or a public URL — both are valid `path` contents).
+ *
+ * UNRESOLVED slots (no source / constant / file entry) ride as a literal
+ * `null` — Gradio's wire shape for "use the upstream default", verified on the
+ * positional dialect — the array's shape itself must never shrink. The `fn`
+ * name rides `ModelProviderBinding.upstreamModelId` (e.g. "/generate_image").
+ */
+export interface GradioArgMap {
+  /** data[] index (string key) → normalized source. */
+  sources?: Record<string, CompatFieldSource>;
+  /** data[] index → static upstream value. */
+  constants?: Record<string, string | number | boolean>;
+  /** data[] indices whose resolved value is wrapped into a FileData dict. */
+  fileInputs?: string[];
+}
 
 /**
  * The DIALECT of an openai-compat binding — the shape of its `paramMap`.
@@ -248,6 +314,13 @@ export interface ModelProviderBinding {
    * binding-level value wins. Only the openai-compat family has presets.
    */
   presetId?: string;
+  /**
+   * The P7b GRADIO dialect — the positional `data[]` slot map of an
+   * `hf-gradio` binding (pure data; NEVER resolver logic — this file stays
+   * client-safe). Interpreted exclusively by `adapters/gradio.ts`; see
+   * `GradioArgMap` above for the index-keyed shape.
+   */
+  argMap?: GradioArgMap;
   /**
    * Set when `presetId` does NOT resolve to a stored preset. The compat
    * adapter fails the job with this message (settled, never a silent
@@ -1522,11 +1595,98 @@ const pollinationsImageBindings: ModelProviderBinding[] = [
   pollinationsImageBinding("gpt-image-2-5-sunburst", "openai/gpt-image-2.5-sunburst", 16),
 ];
 
+// ── P7b: hf-gradio family (HF Spaces / Gradio positional dialect) ───────────
+
+/**
+ * One code-seeded `hf-gradio` binding for a PUBLIC Space (P7 plan rev-2 step
+ * 3, tables §appendix). Every binding carries its OWN Space base URL (one
+ * credentials row for the whole family — the HF token lives on the provider
+ * config `hf-gradio`, keyed by `keyEnv`):
+ *
+ *  - `upstreamModelId` = the fn channel (`/generate_image` / `/generate_video`)
+ *    — NOT a model string; positional `data[]` replaces everything a model id
+ *    would otherwise shape.
+ *  - `argMap` = the `data[]` slot map from the Space's recorded signature
+ *    (`/gradio_api/info` order is authoritative — NOT UI order, and NOT the
+ *    same between Spaces; `docs/provider-phase7-spike.md`). Unmapped indices
+ *    ride as a literal `null` ("use upstream default").
+ *  - `mediaStaging: "remote-url"` ⇒ every media input is either a public URL
+ *    (fetchable by the Space — pass-through) or uploaded to the Space's own
+ *    `/gradio_api/upload` first (mediaStager "remote-url" branch →
+ *    `adapters/gradio.ts` uploadMedia → `/tmp/gradio/…` path).
+ */
+const GRADIO_BASE_URL_Z_IMAGE = "https://mrfakename-z-image-turbo.hf.space";
+const GRADIO_BASE_URL_WAN = "https://multimodalart-wan2-1-fast.hf.space";
+
+const gradioBindings: readonly ModelProviderBinding[] = [
+  {
+    // mrfakename/Z-Image-Turbo · fn /generate_image (spike §Z-Image-Turbo).
+    // data = [prompt, height(1024), width(1024), steps(9), seed, randomize_seed(true)].
+    modelId: "z-image-turbo",
+    providerId: "hf-gradio",
+    upstreamModelId: "/generate_image",
+    family: "standard",
+    baseUrl: GRADIO_BASE_URL_Z_IMAGE,
+    // The HF token (optional for public Spaces, mandatory for private ones)
+    // rides the provider config row — one key for the whole gradio family.
+    keyEnv: "HF_TOKEN",
+    mediaStaging: "remote-url",
+    argMap: {
+      sources: {
+        "0": "prompt",
+        "4": "seed",
+      },
+      constants: {
+        "1": 1024,
+        "2": 1024,
+        "3": 9,
+        "5": true,
+      },
+    },
+  },
+  {
+    // multimodalart/wan2-1-fast · fn /generate_video, IMAGE→VIDEO slot
+    // (spike §wan2-1-fast). data = [input_image(FileData), prompt, height(896),
+    // width(512), negative_prompt(""), duration_seconds(1), guidance_scale(4),
+    // steps, seed, randomize_seed(true)].
+    modelId: "wan2-1-fast",
+    providerId: "hf-gradio",
+    upstreamModelId: "/generate_video",
+    family: "standard",
+    baseUrl: GRADIO_BASE_URL_WAN,
+    keyEnv: "HF_TOKEN",
+    mediaStaging: "remote-url",
+    argMap: {
+      sources: {
+        "0": "startFrame",
+        "1": "prompt",
+        "8": "seed",
+      },
+      constants: {
+        // Index 2 = height, index 3 = width (spike §wan2-1-fast — height
+        // precedes width HERE, unlike Z-Image-Turbo where width precedes).
+        "2": 512,
+        "3": 896,
+        // negative_prompt "" (upstream default is a long anti-quality string —
+        // we do not carry it); duration_seconds (5) and its future picker ride
+        // the unresolved slot (`null` ⇒ the upstream default 2s) — pickers are
+        // wired with P7a-1, noted as a deviation.
+        "4": "",
+        "6": 1,
+        "7": 4,
+        "9": true,
+      },
+      fileInputs: ["0"],
+    },
+  },
+];
+
 /**
  * C1 static binding set: 11 image models + 17 video models, each with a Kie
  * binding (`upstreamModelId = apiId`), plus Azure and Codex for `gpt-image-2`,
- * OpenRouter for the 19 SHIP image models and the 12 swept VIDEO models, and
- * Pollinations for the 11 SHIP image models → 63 code-defined bindings.
+ * OpenRouter for the 19 SHIP image models and the 12 swept VIDEO models,
+ * Pollinations for the 11 SHIP image models, and the two P7b `hf-gradio`
+ * Space bindings → 65 code-defined bindings.
  * Immutable by convention — merge copies for overrides (the registry never
  * mutates these).
  */
@@ -1538,6 +1698,7 @@ export const BUILT_IN_BINDINGS: readonly ModelProviderBinding[] = [
   ...openRouterImageBindings,
   ...openRouterVideoBindings,
   ...pollinationsImageBindings,
+  ...gradioBindings,
 ];
 
 const DEFAULT_BINDINGS = new Map<string, ModelProviderBinding>(

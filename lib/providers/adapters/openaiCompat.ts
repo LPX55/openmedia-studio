@@ -39,13 +39,13 @@ import { envFallbackKeyName, getProviderRuntimeConfig } from "../../guest/db";
 import { MEDIA_DIR } from "../../guest/paths";
 import { appendJobLog, describeError, urlHost } from "../../jobLog";
 import type { ProviderMeta } from "../../jobStore";
-import type { CompatFieldSource, CompatParamMap, ModelProviderBinding } from "../bindings";
+import type { CompatParamMap, ModelProviderBinding } from "../bindings";
+import { applyValueMap, resolveFieldValue, stagedUrlOf } from "./sources";
 import type {
   GenerateInput,
   GenerationProvider,
   PollOutcome,
   ProviderRuntimeConfig,
-  StagedMedia,
   SubmitOutcome,
 } from "../types";
 
@@ -212,68 +212,22 @@ function resolvePath(binding: ModelProviderBinding | undefined): string {
 // ── Request body ─────────────────────────────────────────────────────────────
 
 /** Staged reference images, as the upstream sees them (data-url or remote). */
-function referenceUrls(input: GenerateInput): string[] {
-  const refs = input.media.references ?? [];
-  return refs.map((r) => r.url ?? r.originalUrl).filter((u) => !!u);
-}
+/**
+ * The staged reference URLs, in order, live in `./sources` (shared with the
+ * P7 gradio family — it resolves its positional data[] slots through the same
+ * source resolver, so this module keeps only its dialect layer).
+ */
 
 /**
- * Value of one normalized source. `undefined` ⇒ the field is NOT sent (the
- * dialect decides what the backend accepts — compat-plan §a: "per-model params
- * on needs basis only").
- */
-function resolveFieldValue(
-  source: CompatFieldSource,
-  input: GenerateInput,
-): string | number | string[] | undefined {
-  const p = input.params;
-  switch (source) {
-    case "prompt":
-      return input.prompt;
-    case "aspectRatio":
-      return p.aspectRatio;
-    case "tier":
-      // The catalog's picker value ("1k" | "2k" | "4k" | "low" | …). The
-      // route's `resolution` is the Azure-style tier — used as a fallback so
-      // a client that sends the tier there still lands on the same field.
-      return p.quality ?? p.resolution;
-    case "quality":
-      return p.quality;
-    case "resolution":
-      return p.resolution;
-    case "size":
-      return p.customWidth && p.customHeight
-        ? `${p.customWidth}x${p.customHeight}`
-        : undefined;
-    case "width":
-      return typeof p.customWidth === "number" ? p.customWidth : undefined;
-    case "height":
-      return typeof p.customHeight === "number" ? p.customHeight : undefined;
-    case "seed":
-      return typeof p.seed === "number" ? p.seed : undefined;
-    case "references":
-      return referenceUrls(input);
-    case "outputFormat": {
-      const apiInput = (input.model as { apiInput?: { outputFormat?: string } }).apiInput;
-      return apiInput?.outputFormat;
-    }
-    default:
-      return undefined;
-  }
-}
-
-/** Apply a dialect value map (normalized value → upstream value). A map entry
+ * Apply a dialect value map (normalized value → upstream value). A map entry
  * of null means DROP the field (used for catalog sentinels like "auto" that
- * an endpoint's enum rejects — the server default applies instead). */
-function applyValueMap(
-  valueMap: Record<string, string | null> | undefined,
-  value: string | number | string[],
-): string | number | string[] | undefined {
-  if (!valueMap || typeof value !== "string") return value;
-  if (!(value in valueMap)) return value;
-  const mapped = valueMap[value];
-  return mapped === null ? undefined : mapped;
-}
+ * an endpoint's enum rejects — the server default applies instead).
+ *
+ * The value-map APPLY + the source RESOLVER live in `./sources` — the shared
+ * home for the normalized source union (P7b's gradio family resolves its
+ * positional data[] slots through the same resolver, openaiCompat.ts keeps
+ * only its dialect layer).
+ */
 
 /** The upstream output format the request asked for (for the buffer MIME). */
 function outputFormatOf(
@@ -657,10 +611,7 @@ interface CompatInputReference {
   audio_url?: { url: string };
 }
 
-/** The staged URL of one media item (the passthrough URL, or the original). */
-function stagedUrlOf(media: StagedMedia | undefined): string | undefined {
-  return media?.url ?? media?.originalUrl;
-}
+/** The staged URL of one media item lives in `./sources` (shared resolver). */
 
 /**
  * The clip length to send: the catalog's (already clamped) duration, else the

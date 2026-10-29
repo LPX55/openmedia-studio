@@ -7,12 +7,13 @@
  * `@/lib/providers/bootstrap` (and jobManager imports `./providers/bootstrap`).
  *
  * Registers the built-in adapters (KieProvider, AzureFoundryProvider,
- * CodexCliProvider, OpenAICompatProvider) into the registry exactly once per
- * server process. Controllers import THIS module (its side effects do the
- * registration) and the re-exported registry API — they NEVER import
- * individual adapters, so a future adapter only touches this file.
+ * CodexCliProvider, OpenAICompatProvider, HfGradioProvider) into the registry
+ * exactly once per server process. Controllers import THIS module (its side
+ * effects do the registration) and the re-exported registry API — they NEVER
+ * import individual adapters, so a future adapter only touches this file.
  * The openai-compat family adapter additionally serves its backend ids
- * ("openrouter", …) through `aliases` (compat-plan §b).
+ * ("openrouter", …) through `aliases` (compat-plan §b); the P7b gradio family
+ * serves its binding-space backends through per-binding base URLs (plan §b).
  *
  * SERVER-ONLY: importing this pulls in the adapters (node:child_process,
  * node:https, kieUpload, guest paths) — never import it from client code.
@@ -22,6 +23,7 @@ import { kieProvider } from "./adapters/kie";
 import { azureProvider } from "./adapters/azure";
 import { codexProvider } from "./adapters/codex";
 import { openaiCompatProvider } from "./adapters/openaiCompat";
+import { gradioProvider } from "./adapters/gradio";
 
 let registered = false;
 
@@ -32,6 +34,7 @@ export function registerBuiltinProviders(): void {
   register(azureProvider);
   register(codexProvider);
   register(openaiCompatProvider);
+  register(gradioProvider);
   registered = true;
 }
 

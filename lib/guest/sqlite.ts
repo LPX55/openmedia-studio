@@ -114,6 +114,30 @@ function createSchema(d: DatabaseSync): void {
       params_json TEXT NOT NULL,
       updated_at TEXT
     );
+
+    -- P7a-1 — CUSTOM LOGICAL MODELS (the C6 relaxation). A user-created model
+    -- row that is NOT in the static catalog (lib/modelConfig.ts). Only the
+    -- columns clients + adapters actually READ are stored: the synthesized
+    -- ImageModel/VideoModel (see lib/guest/customModels.ts) fills every absent
+    -- field from a NEUTRAL base, never from a real catalog entry.
+    --   api_input_json → the ImageModel.apiInput subset
+    --                    { aspectRatioKey, imageInputKey?, qualityKey?,
+    --                      qualityMap?, qualityOptions?, promptMaxLength,
+    --                      outputFormat?, durationMin?, durationMax?, extra? }
+    -- kind is 'image' | 'video'; the static catalog always wins on an id
+    -- collision (POST /api/settings/providers rejects such an id).
+    CREATE TABLE IF NOT EXISTS custom_models (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      label TEXT NOT NULL,
+      supports_images INTEGER NOT NULL DEFAULT 0,
+      max_images INTEGER NOT NULL DEFAULT 0,
+      supports_quality INTEGER NOT NULL DEFAULT 0,
+      ratios_json TEXT,
+      api_input_json TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
   `);
 
   // Provider-refactor Phase 2 migration (design.md §3.1) — idempotent: fresh

@@ -624,6 +624,233 @@ export function deleteProviderModelBindings(providerId: string): void {
   db().prepare("DELETE FROM model_bindings WHERE provider_id = ?").run(providerId);
 }
 
+/** Removes all model_bindings rows for ONE model (custom-model cascade). */
+export function deleteModelBindingsForModel(modelId: string): void {
+  db().prepare("DELETE FROM model_bindings WHERE model_id = ?").run(modelId);
+}
+
+// ── Custom logical models (P7a-1) ──────────────────────────────────────────
+//
+// A custom model is a user-created catalog row (C6 relaxation): NOT in
+// lib/modelConfig.ts, but resolvable to a COMPLETE ImageModel/VideoModel by
+// lib/guest/customModels.ts. Storage only — the shaping/neutral-base rules
+// live in that module.
+
+export type CustomModelKind = "image" | "video";
+
+/**
+ * The `api_input_json` subset a custom model carries — the union of the
+ * ImageModel/VideoModel `apiInput` fields clients + adapters actually read.
+ * `aspectRatioKey` / `promptMaxLength` are always materialised (adapters slice
+ * prompts with them: azure.ts / codex.ts); the rest are optional.
+ */
+export interface CustomModelApiInput {
+  aspectRatioKey: string;
+  promptMaxLength: number;
+  imageInputKey?: string;
+  qualityKey?: string;
+  qualityOptions?: string[];
+  qualityMap?: Record<string, string>;
+  outputFormat?: string;
+  durationMin?: number;
+  durationMax?: number;
+  extra?: Record<string, unknown>;
+}
+
+/** One stored custom model (row-shaped; JSON columns parsed on read). */
+export interface CustomModelRecord {
+  id: string;
+  kind: CustomModelKind;
+  label: string;
+  supportsImages: boolean;
+  maxImages: number;
+  supportsQuality: boolean;
+  ratios: string[];
+  apiInput: CustomModelApiInput;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+interface CustomModelRow {
+  id: string;
+  kind: string;
+  label: string | null;
+  supports_images: number | null;
+  max_images: number | null;
+  supports_quality: number | null;
+  ratios_json: string | null;
+  api_input_json: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+/**
+ * Tolerant read of `api_input_json`. A malformed row never throws the report:
+ * the resolver's neutral base fills the holes (a missing promptMaxLength would
+ * otherwise crash azure/codex at generation time, so it is materialised here
+ * with the same 32000 default the resolver uses).
+ */
+function parseCustomModelApiInput(v: string | null): CustomModelApiInput {
+  let parsed: Record<string, unknown> = {};
+  if (v) {
+    try {
+      const raw = JSON.parse(v) as unknown;
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) parsed = raw as Record<string, unknown>;
+    } catch { /* malformed — neutral defaults below */ }
+  }
+  const str = (k: string): string | undefined =>
+    typeof parsed[k] === "string" && (parsed[k] as string).trim() ? (parsed[k] as string).trim() : undefined;
+  const num = (k: string): number | undefined =>
+    typeof parsed[k] === "number" && Number.isFinite(parsed[k]) ? (parsed[k] as number) : undefined;
+  const out: CustomModelApiInput = {
+    aspectRatioKey: str("aspectRatioKey") ?? "aspect_ratio",
+    promptMaxLength:
+      typeof parsed.promptMaxLength === "number" && Number.isFinite(parsed.promptMaxLength) && parsed.promptMaxLength > 0
+        ? parsed.promptMaxLength
+        : 32000,
+  };
+  const imageInputKey = str("imageInputKey");
+  if (imageInputKey) out.imageInputKey = imageInputKey;
+  const qualityKey = str("qualityKey");
+  if (qualityKey) out.qualityKey = qualityKey;
+  if (Array.isArray(parsed.qualityOptions)) {
+    const opts = parsed.qualityOptions.filter((x): x is string => typeof x === "string" && !!x.trim());
+    if (opts.length) out.qualityOptions = opts;
+  }
+  if (parsed.qualityMap && typeof parsed.qualityMap === "object" && !Array.isArray(parsed.qualityMap)) {
+    const map: Record<string, string> = {};
+    for (const [k, val] of Object.entries(parsed.qualityMap as Record<string, unknown>)) {
+      if (typeof val === "string") map[k] = val;
+    }
+    if (Object.keys(map).length) out.qualityMap = map;
+  }
+  const outputFormat = str("outputFormat");
+  if (outputFormat) out.outputFormat = outputFormat;
+  const durationMin = num("durationMin");
+  if (durationMin !== undefined) out.durationMin = durationMin;
+  const durationMax = num("durationMax");
+  if (durationMax !== undefined) out.durationMax = durationMax;
+  if (parsed.extra && typeof parsed.extra === "object" && !Array.isArray(parsed.extra)) {
+    out.extra = parsed.extra as Record<string, unknown>;
+  }
+  return out;
+}
+
+function parseStringArray(v: string | null): string[] {
+  if (!v) return [];
+  try {
+    const parsed = JSON.parse(v) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string" && !!x.trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rowToCustomModel(r: CustomModelRow): CustomModelRecord {
+  return {
+    id: r.id,
+    kind: r.kind === "video" ? "video" : "image",
+    label: r.label ?? r.id,
+    supportsImages: r.supports_images === 1,
+    maxImages: typeof r.max_images === "number" ? r.max_images : 0,
+    supportsQuality: r.supports_quality === 1,
+    ratios: parseStringArray(r.ratios_json),
+    apiInput: parseCustomModelApiInput(r.api_input_json),
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+/** Every stored custom model, ordered by id (stable report order). */
+export function getCustomModelRows(): CustomModelRecord[] {
+  const rows = db()
+    .prepare("SELECT * FROM custom_models ORDER BY id")
+    .all() as unknown as CustomModelRow[];
+  return rows.map(rowToCustomModel);
+}
+
+/** One stored custom model, or `null` when the id is unknown. */
+export function getCustomModelRow(id: string): CustomModelRecord | null {
+  const r = db()
+    .prepare("SELECT * FROM custom_models WHERE id = ?")
+    .get(id) as unknown as CustomModelRow | undefined;
+  return r ? rowToCustomModel(r) : null;
+}
+
+/**
+ * Inserts/updates a custom model. `created_at` is preserved across updates;
+ * `updated_at` always moves. The caller (lib/guest/customModels.ts) has already
+ * normalised the shape (neutral defaults applied, JSON sanitised).
+ */
+export function upsertCustomModelRow(data: Omit<CustomModelRecord, "createdAt" | "updatedAt">): void {
+  const ts = now();
+  db()
+    .prepare(`
+      INSERT INTO custom_models
+        (id, kind, label, supports_images, max_images, supports_quality,
+         ratios_json, api_input_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        kind = excluded.kind,
+        label = excluded.label,
+        supports_images = excluded.supports_images,
+        max_images = excluded.max_images,
+        supports_quality = excluded.supports_quality,
+        ratios_json = excluded.ratios_json,
+        api_input_json = excluded.api_input_json,
+        updated_at = excluded.updated_at
+    `)
+    .run(
+      data.id, data.kind, data.label,
+      data.supportsImages ? 1 : 0, data.maxImages, data.supportsQuality ? 1 : 0,
+      JSON.stringify(data.ratios), JSON.stringify(data.apiInput), ts, ts,
+    );
+}
+
+/**
+ * Deletes a custom model AND every `model_bindings` row for it, in one
+ * transaction (P7a-1 cascade): deleting only the model would leave bindings
+ * pointing at an id nothing can resolve.
+ */
+export function deleteCustomModelRow(id: string): void {
+  const d = db();
+  d.exec("BEGIN");
+  try {
+    d.prepare("DELETE FROM model_bindings WHERE model_id = ?").run(id);
+    d.prepare("DELETE FROM custom_models WHERE id = ?").run(id);
+    d.exec("COMMIT");
+  } catch (e) {
+    d.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+/**
+ * Custom model ids that would become UNBOUND when `providerId` is deleted:
+ * they have a `model_bindings` row for that provider and no row for any other
+ * provider. `DELETE /api/settings/providers?providerId=` keeps its existing
+ * effect (all of that provider's rows are wiped) but reports these ids instead
+ * of silently orphaning them.
+ */
+export function getCustomModelIdsOnlyBoundTo(providerId: string): string[] {
+  const rows = db()
+    .prepare(`
+      SELECT cm.id AS id
+      FROM custom_models cm
+      WHERE EXISTS (
+              SELECT 1 FROM model_bindings mb
+              WHERE mb.model_id = cm.id AND mb.provider_id = ?
+            )
+        AND NOT EXISTS (
+              SELECT 1 FROM model_bindings mb
+              WHERE mb.model_id = cm.id AND mb.provider_id != ?
+            )
+      ORDER BY cm.id
+    `)
+    .all(providerId, providerId) as Array<{ id: string }>;
+  return rows.map((r) => r.id);
+}
+
 // ── Legacy key wrappers (kept for /api/assistant + lib/getKieToken.ts) ──────
 // Phase 3: these now delegate to `provider_configs` so the legacy `settings`
 // rows are never re-created after the one-shot C7a migration (DELETE stays

@@ -16,7 +16,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveForModel } from "@/lib/providers/bootstrap";
 import { createStagingResolver, stageInputMedia } from "@/lib/providers/mediaStager";
 import { submitJob } from "@/lib/jobManager";
-import { IMAGE_MODELS } from "@/lib/modelConfig";
+// P7a-1: the shared catalog resolver (static IMAGE_MODELS first, then a
+// `custom_models` row) — the ONE merge point, never an inline catalog find.
+import { resolveImageModel } from "@/lib/guest/customModels";
 import * as guestDb from "@/lib/guest/db";
 
 export const maxDuration = 1000;
@@ -54,8 +56,17 @@ export async function POST(req: NextRequest) {
 
   if (!prompt?.trim()) return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
 
-  const modelCfg = IMAGE_MODELS.find((m) => m.id === model);
-  if (!modelCfg) return NextResponse.json({ error: `Unknown model: ${model}` }, { status: 400 });
+  const modelCfg = resolveImageModel(model);
+  if (!modelCfg) {
+    return NextResponse.json(
+      {
+        error:
+          `Unknown model: ${model} — it is not in the static catalog and no custom model ` +
+          `is registered under that id (create one in Settings first)`,
+      },
+      { status: 400 },
+    );
+  }
 
   try {
     const { provider, binding, config } = resolveForModel(model, providerId, guestDb.getModelBindingRows(model));

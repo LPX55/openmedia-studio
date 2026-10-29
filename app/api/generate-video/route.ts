@@ -21,7 +21,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveForModel } from "@/lib/providers/bootstrap";
 import { createStagingResolver, stageInputMedia } from "@/lib/providers/mediaStager";
 import { submitJob } from "@/lib/jobManager";
-import { VIDEO_MODELS } from "@/lib/modelConfig";
+// P7a-1: the shared catalog resolver (static VIDEO_MODELS first, then a
+// `custom_models` row) — the ONE merge point, never an inline catalog find.
+import { resolveVideoModel } from "@/lib/guest/customModels";
 import * as guestDb from "@/lib/guest/db";
 
 interface Resource {
@@ -62,8 +64,17 @@ export async function POST(req: NextRequest) {
       debugOnly       = false,
     } = body;
 
-    const modelCfg = VIDEO_MODELS.find((m) => m.id === videoModel);
-    if (!modelCfg) return NextResponse.json({ error: `Unknown video model: ${videoModel}` }, { status: 400 });
+    const modelCfg = resolveVideoModel(videoModel);
+    if (!modelCfg) {
+      return NextResponse.json(
+        {
+          error:
+            `Unknown video model: ${videoModel} — it is not in the static catalog and no custom ` +
+            `model is registered under that id (create one in Settings first)`,
+        },
+        { status: 400 },
+      );
+    }
 
     const resolution = rawResolution || modelCfg.defaultResolution || "480p";
 

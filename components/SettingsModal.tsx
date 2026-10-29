@@ -199,6 +199,10 @@ function ProviderToggle({
   /** The model's provider union from GET bindingsByModel (falls back to all three pre-hydration). */
   providers: ProviderId[];
 }) {
+  // Subscribe to the bootstrap so a custom provider's label (reported in
+  // `providers[id].label`) replaces the raw id once hydration lands.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const providerStatus = useWorkflowStore((s) => s.providerStatus);
   return (
     <div
       style={{
@@ -494,24 +498,28 @@ const COMPAT_ENDPOINTS: {
   label: string;
   hint: string;
   baseUrlPinned: boolean;
+  kind: string;
 }[] = [
   {
     id: "openrouter",
     label: "OpenRouter",
     hint: "OpenAI-compatible image backend (OpenRouter dialect).",
     baseUrlPinned: true,
+    kind: "openai-compat",
   },
   {
     id: "pollinations",
     label: "Pollinations",
     hint: "OpenAI-compatible image backend (Pollinations sync leg).",
     baseUrlPinned: true,
+    kind: "openai-compat",
   },
   {
     id: "openai-compat",
     label: "Custom OpenAI-Compatible",
     hint: "Any OpenAI-speaking endpoint (LiteLLM, new-api, your own gateway).",
     baseUrlPinned: false,
+    kind: "openai-compat",
   },
 ];
 
@@ -520,11 +528,14 @@ function CompatEndpointCard({
   label,
   hint,
   baseUrlPinned,
+  kind,
 }: {
   id: string;
   label: string;
   hint: string;
   baseUrlPinned: boolean;
+  /** The backend family from the report (`openai-compat` | `hf-gradio` | `mcp`). */
+  kind: string;
 }) {
   const status = useWorkflowStore((s) => s.providerStatus[id]);
   const presets = useWorkflowStore((s) => s.presets);
@@ -639,8 +650,10 @@ function CompatEndpointCard({
         >
           <ProviderBrandIcon id={id} size={16} />
           {/* Backends with their own brand mark (OpenRouter "OR", Pollinations
-              "POL") don't need the generic "OC" fallback beside it. */}
-          {id === "openrouter" || id === "pollinations" ? null : (
+              "POL") don't need the generic "OC" fallback beside it. A
+              user-created non-compat family (HF Space / MCP) has no brand at
+              all — its label above is the identity. */}
+          {id === "openrouter" || id === "pollinations" || kind !== "openai-compat" ? null : (
             <span
               style={{
                 fontSize: "10px", fontWeight: 700, letterSpacing: "-0.02em",
@@ -758,13 +771,18 @@ function CompatEndpointCard({
           onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"; }}
         />
         <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", margin: 0, lineHeight: 1.5 }}>
-          {baseUrlPinned
-            ? "Pinned by this backend's built-in binding — the endpoint path is appended to it."
-            : "The endpoint path (/v1/images/generations) is appended to this base."}
+          {kind === "hf-gradio"
+            ? "The HF Space URL — the gradio adapter appends its own API paths."
+            : kind === "mcp"
+              ? "The MCP server URL (…/mcp/)."
+              : baseUrlPinned
+                ? "Pinned by this backend's built-in binding — the endpoint path is appended to it."
+                : "The endpoint path (/v1/images/generations) is appended to this base."}
         </p>
       </div>
 
-      {/* Param preset */}
+      {/* Param preset — only an openai-compat backend speaks the preset dialect. */}
+      {kind === "openai-compat" && (
       <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
         <label
           htmlFor={`compat-preset-${id}`}
@@ -812,6 +830,7 @@ function CompatEndpointCard({
           overrides still win.
         </p>
       </div>
+      )}
 
       {error && (
         <p style={{ fontSize: "11px", color: "rgba(239,68,68,0.7)", margin: 0 }}>{error}</p>
@@ -871,6 +890,22 @@ function ApiKeysPanel({
     | { status: "error"; error: string };
   const [loginFlow, setLoginFlow] = useState<CodexLoginFlow>({ status: "idle" });
   const [codeCopied, setCodeCopied] = useState(false);
+
+  // P7a-1: user-created backends come from the same bootstrap report. The
+  // static COMPAT_ENDPOINTS list stays first; every reported provider that
+  // carries a `kind` and is not already listed gets its own card, rendered
+  // with the server's label + family (no client-side hardcoded list).
+  const providerStatus = useWorkflowStore((s) => s.providerStatus);
+  const customEndpoints = Object.entries(providerStatus)
+    .filter(([id, p]) => !!p.kind && !COMPAT_ENDPOINTS.some((ep) => ep.id === id))
+    .map(([id, p]) => ({
+      id,
+      label: p.label.trim() || id,
+      hint: `User-created ${p.kind} backend.`,
+      baseUrlPinned: false,
+      kind: p.kind as string,
+    }));
+  const endpointCards = [...COMPAT_ENDPOINTS, ...customEndpoints];
 
   const handleConnectCodex = async () => {
     setLoginFlow({ status: "starting" });
@@ -1215,25 +1250,27 @@ function ApiKeysPanel({
         </div>
       </div>
 
-      {/* ──── Compatible endpoints (openai-compat family) ───────────────── */}
+      {/* ──── Custom endpoints (openai-compat / HF Space / MCP) ─────────── */}
       <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
         <div>
           <div style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.85)" }}>
-            Compatible endpoints
+            Custom endpoints
           </div>
           <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.28)", marginTop: "4px", lineHeight: 1.5 }}>
-            Any OpenAI-speaking backend: point it at a base URL, give it a key and pick the param
-            preset that describes its dialect. The preset supplies the base request params — the
-            binding&apos;s own params and any custom overrides still win.
+            User-created backends — OpenAI-speaking endpoints, HF Spaces and MCP servers — point at a
+            base URL and give them a key. An OpenAI-compatible backend can also pick the param preset
+            that describes its dialect; the preset supplies the base request params and the
+            binding&apos;s own params and custom overrides still win.
           </p>
         </div>
-        {COMPAT_ENDPOINTS.map((ep) => (
+        {endpointCards.map((ep) => (
           <CompatEndpointCard
             key={ep.id}
             id={ep.id}
             label={ep.label}
             hint={ep.hint}
             baseUrlPinned={ep.baseUrlPinned}
+            kind={ep.kind}
           />
         ))}
       </div>
@@ -1397,16 +1434,27 @@ function ProviderLegend() {
   // provider picker. The state is global, so both model panels agree.
   const disabledProviders = useWorkflowStore((s) => s.disabledProviders);
   const setProviderEnabled = useWorkflowStore((s) => s.setProviderEnabled);
+  // P7a-1: user-created backends ride the same bootstrap report. The static
+  // list stays first; every reported provider that carries a `kind` and is not
+  // already listed gets a toggle too (label + kind from the server, never a
+  // client-side hardcoded name).
+  const providerStatus = useWorkflowStore((s) => s.providerStatus);
+  const legendProviders: { id: string; label: string; kind?: string }[] = [
+    ...PROVIDERS.map((p) => ({ id: p.id as string, label: p.label })),
+    ...Object.entries(providerStatus)
+      .filter(([id, p]) => !!p.kind && !PROVIDERS.some((sp) => sp.id === id))
+      .map(([id, p]) => ({ id, label: p.label.trim() || id, kind: p.kind })),
+  ];
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", padding: "12px 16px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "10px" }}>
-      {PROVIDERS.map((p) => {
+      {legendProviders.map((p) => {
         const hidden = disabledProviders.includes(p.id);
         return (
           <button
             key={p.id}
             id={`provider-visibility-${p.id}`}
             onClick={() => setProviderEnabled(p.id, hidden)}
-            title={hidden ? `Show ${p.label} in the provider pickers` : `Hide ${p.label} from the provider pickers`}
+            title={`${hidden ? "Show" : "Hide"} ${p.label}${p.kind ? ` (${p.kind})` : ""} in the provider pickers`}
             style={{
               display: "flex",
               alignItems: "center",

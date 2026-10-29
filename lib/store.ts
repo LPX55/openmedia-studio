@@ -163,6 +163,18 @@ export interface Toast {
  * kieKeySet/azureKeySet source (§3.4).
  */
 export interface ProviderStatusEntry {
+  /**
+   * The display label from the server report. Built-in ids carry their
+   * catalog label; a user-created backend carries its stored `extra.label`
+   * (or degrades to the raw id). Kept so Settings/pickers never have to
+   * fabricate a label from the id.
+   */
+  label:     string;
+  /**
+   * The backend family (P7a-0). Only user-created `provider_configs` rows
+   * carry it in the report — built-in entries keep their pre-P7a shape.
+   */
+  kind?:     string;
   hasKey:    boolean;
   ready:     boolean;
   deployments: Record<string, string>;
@@ -187,6 +199,46 @@ export interface ProviderPresetInfo {
   id: string;
   family: string;
   params: Record<string, unknown>;
+}
+
+/**
+ * One custom logical model from GET /api/settings/providers → `customModels`
+ * (P7a-1). A custom model is a user-created model row (a Space / MCP tool /
+ * compat endpoint) that is NOT in the static `lib/modelConfig.ts` catalog, so
+ * the client must read its capabilities from the server report instead of
+ * inheriting another catalog model's defaults.
+ */
+export interface CustomModelApiInput {
+  /** Field name the binding uses for the aspect ratio. */
+  aspectRatioKey: string;
+  /** Max prompt length accepted by the model. */
+  promptMaxLength: number;
+  /** Field name for the reference image array (omit if unsupported). */
+  imageInputKey?: string;
+  /** Field name for the quality setting (omit if unsupported). */
+  qualityKey?: string;
+  /** Quality values offered by the picker. */
+  qualityOptions?: string[];
+  /** App-level quality value → API-specific string. */
+  qualityMap?: Record<string, string>;
+  /** Fixed output format to always send (omit to skip the field). */
+  outputFormat?: string;
+  /** Video duration bounds. */
+  durationMin?: number;
+  durationMax?: number;
+  /** Any other static fields the binding includes in its input object. */
+  extra?: Record<string, unknown>;
+}
+
+export interface CustomModelInfo {
+  id: string;
+  kind: "image" | "video";
+  label: string;
+  supportsImages: boolean;
+  maxImages: number;
+  supportsQuality: boolean;
+  ratios: string[];
+  apiInput: CustomModelApiInput;
 }
 
 interface WorkflowStore {
@@ -224,8 +276,12 @@ interface WorkflowStore {
   providersHydrated: boolean;
   /** The stored param presets (compat-plan §c) — the Settings picker's data. */
   presets:           ProviderPresetInfo[];
+  /** Custom logical models (P7a-1) — read from the same bootstrap, never persisted. */
+  customModels:      CustomModelInfo[];
   setProviderBootstrap: (payload: {
     providers?: Record<string, {
+      label?: string;
+      kind?: string;
       hasKey?: boolean;
       ready?: boolean;
       deployments?: Record<string, string>;
@@ -238,6 +294,7 @@ interface WorkflowStore {
     modelPrefs?: Record<string, string>;
     bindingsByModel?: Record<string, string[]>;
     presets?: ProviderPresetInfo[];
+    customModels?: CustomModelInfo[];
   }) => void;
 
   // ── Spaces
@@ -821,11 +878,14 @@ export const useWorkflowStore = create<WorkflowStore>()(
         bindingsByModel:   {},
         providersHydrated: false,
         presets:           [],
+        customModels:      [],
         setProviderBootstrap: (payload) =>
           set(() => {
             const providerStatus: ProviderStatusMap = {};
             for (const [id, p] of Object.entries(payload.providers ?? {})) {
               providerStatus[id] = {
+                label:       typeof p.label === "string" && p.label.trim() ? p.label.trim() : id,
+                ...(typeof p.kind === "string" && p.kind ? { kind: p.kind } : {}),
                 hasKey:      !!p.hasKey,
                 ready:       !!p.ready,
                 deployments: p.deployments ?? {},
@@ -842,6 +902,9 @@ export const useWorkflowStore = create<WorkflowStore>()(
               bindingsByModel:   payload.bindingsByModel ?? {},
               providersHydrated: true,
               presets:           payload.presets       ?? [],
+              // P7a-1: custom logical models ride the same server report.
+              // Absent until the server lane lands ⇒ [] (never a client default).
+              customModels:      payload.customModels  ?? [],
               // Chat compatibility (§3.4): the legacy key flags are DERIVED
               // from the same bootstrap instead of the kie-key/azure-key routes.
               kieKeySet:   payload.providers?.kie   ? !!payload.providers.kie.hasKey   : null,

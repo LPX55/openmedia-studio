@@ -9,8 +9,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import type { ProviderId } from "@/lib/providers";
 
-/** Backend brand mark for the provider pill/toggle (kie/azure/codex/openrouter/pollinations) — distinct from NodeProviderIcon's model-brand icons. */
-export function ProviderBrandIcon({ id, size = 12 }: { id: ProviderId; size?: number }) {
+/**
+ * Backend brand mark for the provider pill/toggle (kie/azure/codex/openrouter/pollinations).
+ *
+ * `id` is optional because the model→provider lookup now returns `undefined`
+ * for an unbound custom model (P7a-1). An unknown/custom backend renders
+ * `null` — no fabricated logo; callers show the provider's label text instead.
+ */
+export function ProviderBrandIcon({ id, size = 12 }: { id?: ProviderId; size?: number }) {
   if (id === "kie") {
     return (
       <span className="text-[#2DD4BF] shrink-0" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.83)}px`, fontWeight: 700 }}>

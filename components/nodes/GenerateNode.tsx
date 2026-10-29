@@ -9,6 +9,7 @@ import { Handle, Position, NodeProps, Node, useUpdateNodeInternals } from "@xyfl
 import CornerResizer from "./CornerResizer";
 import NodeActionBar from "./NodeActionBar";
 import { useWorkflowStore, NodeData } from "@/lib/store";
+import type { CustomModelInfo } from "@/lib/store";
 import { resolveInputs } from "@/lib/executor";
 import { useReadOnly } from "@/lib/readOnlyContext";
 import { browserNotify, requestNotificationPermission } from "@/lib/browserNotify";
@@ -17,14 +18,26 @@ type GenerateNodeType = Node<NodeData, "generateNode">;
 
 import { ShieldBan, Sparkles } from "lucide-react";
 import { IMAGE_MODELS, AZURE_POPULAR_SIZES, validateAzureCustomSize } from "@/lib/modelConfig";
-import { PROVIDERS, getModelProvider, setModelProvider, modelHasProviderChoice, enabledProvidersForModel, isModelReady, isModelEnabled, defaultModelId } from "@/lib/providers";
+import { getModelProvider, setModelProvider, modelHasProviderChoice, enabledProvidersForModel, isModelReady, isModelEnabled, defaultModelId, providerMeta } from "@/lib/providers";
 import { ProviderBrandIcon, NodeProviderIcon } from "@/components/ui/ProviderIcon";
 import { useGeneratingBorderAnimation } from "@/lib/useGeneratingBorderAnimation";
 import MissingInputWarning from "./MissingInputWarning";
 
+/** The capability subset the node's pills read from a model. */
+interface ModelCaps {
+  supportsImages: boolean;
+  supportsQuality: boolean;
+  ratios: string[];
+  maxImages: number;
+  qualityOptions?: string[];
+  qualityKey?: string;
+  azureQualityOptions?: string[];
+  azureResolutionOptions?: string[];
+}
+
 // Derived from config — no hardcoding needed
 const MODELS = IMAGE_MODELS.map((m) => ({ id: m.id, name: m.name, meta: m.provider }));
-const MODEL_CAPS = Object.fromEntries(
+const MODEL_CAPS: Record<string, ModelCaps | undefined> = Object.fromEntries(
   IMAGE_MODELS.map((m) => [m.id, {
     supportsImages: m.supportsImages,
     supportsQuality: m.supportsQuality,
@@ -36,7 +49,52 @@ const MODEL_CAPS = Object.fromEntries(
     azureResolutionOptions: m.azureResolutionOptions,
   }])
 );
-const DEFAULT_CAPS = MODEL_CAPS["nano-banana-2"];
+
+/**
+ * Neutral capabilities for an id the static catalog does not know and the
+ * server report does not describe. NEVER inherit another model's caps: that
+ * would silently show nano-banana-2's ratios/quality options on a custom
+ * model (P7a-1).
+ */
+const NEUTRAL_CAPS: ModelCaps = {
+  supportsImages: false,
+  supportsQuality: false,
+  ratios: ["1:1"],
+  maxImages: 0,
+};
+
+/** Capabilities of a custom logical model (P7a-1 report shape). */
+function capsFromCustomModel(m: CustomModelInfo | undefined): ModelCaps | undefined {
+  if (!m || m.kind !== "image") return undefined;
+  return {
+    supportsImages: m.supportsImages,
+    supportsQuality: m.supportsQuality,
+    // A report with no ratios still needs one usable option.
+    ratios: m.ratios.length > 0 ? m.ratios : ["1:1"],
+    maxImages: m.maxImages,
+    qualityOptions: m.apiInput.qualityOptions,
+    qualityKey: m.apiInput.qualityKey,
+    // A custom model carries no Azure-specific capability data.
+    azureQualityOptions: undefined,
+    azureResolutionOptions: undefined,
+  };
+}
+
+/** Static catalog caps → custom-model caps → neutral. Never a catalog default. */
+function capsForModel(modelId: string, customModels: readonly CustomModelInfo[]): ModelCaps {
+  return (
+    MODEL_CAPS[modelId] ??
+    capsFromCustomModel(customModels.find((m) => m.id === modelId)) ??
+    NEUTRAL_CAPS
+  );
+}
+
+/** Static quality ids → pill labels. Custom models may report other ids. */
+const QUALITY_CHOICES = [
+  { id: "1k", label: "1K", meta: "Standard" },
+  { id: "2k", label: "2K", meta: "High" },
+  { id: "4k", label: "4K", meta: "Maximum" },
+];
 
 // ── Aspect ratios ─────────────────────────────────────────────────────────────
 
@@ -388,6 +446,8 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
   // makes the node re-render when a toggle flips.
   const disabledModels = useWorkflowStore((s) => s.disabledModels);
   const disabledProviders = useWorkflowStore((s) => s.disabledProviders);
+  // P7a-1 custom logical models — same bootstrap as readiness/bindings.
+  const customModels = useWorkflowStore((s) => s.customModels);
   const visibleModels = useMemo(
     () => MODELS.filter((m) => isModelEnabled(m.id, disabledModels)),
     [disabledModels],
@@ -395,9 +455,23 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
 
   // The model's fallback default skips hidden models (declutter).
   const model = (data.model as string) ?? defaultModelId(IMAGE_MODELS, "nano-banana-2", disabledModels);
-  const caps = MODEL_CAPS[model] ?? DEFAULT_CAPS;
-  const modelInfo = MODELS.find((m) => m.id === model) ?? MODELS[0];
+  const customModel = customModels.find((m) => m.id === model);
+  // Never inherit a catalog model's caps for an id the catalog does not know:
+  // static catalog → the custom model's reported caps → neutral.
+  const caps = capsForModel(model, customModels);
+  // Same rule for the pill: an unknown id shows its custom label (or the raw
+  // id), never the first catalog model's name.
+  const modelInfo = MODELS.find((m) => m.id === model) ?? {
+    id: model,
+    name: customModel?.label ?? model,
+    meta: "",
+  };
   const quality = (data.quality as string) ?? "1k";
+  // The pill's options come from the caps — a custom model may report ids
+  // outside the static 1k/2k/4k set, so render those verbatim.
+  const qualityChoices = (caps.qualityOptions ?? QUALITY_CHOICES.map((q) => q.id)).map(
+    (id) => QUALITY_CHOICES.find((q) => q.id === id) ?? { id, label: id.toUpperCase(), meta: "" },
+  );
   const status = data.status ?? "idle";
 
   // Derived from the store at render (modelProviders subscribed above drives
@@ -422,19 +496,27 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
     const hasImages = edges.some((e) => e.target === id && e.targetHandle === "image");
     const limit = (!hasImages && cfg?.textOnlyPromptMaxLength)
       ? cfg.textOnlyPromptMaxLength
-      : (cfg?.apiInput.promptMaxLength ?? Infinity);
+      : (cfg?.apiInput.promptMaxLength ?? customModel?.apiInput.promptMaxLength ?? Infinity);
     return { len: text.length, limit, over: text.length > limit };
   })();
   const promptOverLimit = promptInfo?.over ?? false;
 
-  // Azure gpt-image-2 lets the user pick a manual width/height instead of a ratio
-  const allowAzureCustomSize = isAzureProvider && !!caps.azureResolutionOptions;
-
-  // If current ratio isn't valid for this model, fall back to first valid ratio (or 1:1)
+  // If current ratio isn't valid for this model, fall back to first valid ratio (or 1:1).
+  // The ratio list is kept as a primitive string so the generation callback's
+  // dependency stays stable even when the caps come from the custom report.
+  const staticCaps = MODEL_CAPS[model];
+  const customRatioList = useWorkflowStore((s) => {
+    const m = s.customModels.find((c) => c.id === model && c.kind === "image");
+    return m ? m.ratios.join("|") : "";
+  });
+  const ratioList = staticCaps ? staticCaps.ratios.join("|") : (customRatioList || "1:1");
+  // Azure custom-size is a static-catalog capability only.
+  const allowAzureCustomSize = isAzureProvider && !!staticCaps?.azureResolutionOptions;
   const rawRatio = (data.aspectRatio as string) ?? "9:16";
-  const aspectRatio = caps.ratios.includes(rawRatio) || (allowAzureCustomSize && rawRatio === "custom")
+  const ratioArr = ratioList.split("|");
+  const aspectRatio = ratioArr.includes(rawRatio) || (allowAzureCustomSize && rawRatio === "custom")
     ? rawRatio
-    : (caps.ratios[0] ?? "1:1");
+    : (ratioArr[0] ?? "1:1");
 
   // "auto" has no fixed pixel dimensions — treat as 1:1 for the CSS ratio
   const [rw, rh] = aspectRatio === "auto" ? [1, 1]
@@ -1161,7 +1243,7 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
                         key={m.id}
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={() => {
-                          const newCaps = MODEL_CAPS[m.id] ?? DEFAULT_CAPS;
+                          const newCaps = capsForModel(m.id, customModels);
                           const validRatio = newCaps.ratios.includes(aspectRatio) ? aspectRatio : "1:1";
                           const validQuality = newCaps.qualityOptions && !newCaps.qualityOptions.includes(quality as "1k" | "2k" | "4k")
                             ? newCaps.qualityOptions[0]
@@ -1197,15 +1279,17 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
               >
                 <span className="flex items-center gap-1.5 text-[11px] text-white/70">
                   <ProviderBrandIcon id={currentProvider} size={11} />
-                  {PROVIDERS.find((p) => p.id === currentProvider)?.label ?? "Kie.ai"}
+                  {currentProvider ? providerMeta(currentProvider).label : ""}
                 </span>
                 <ChevronIcon open={providerOpen} />
               </button>
               {providerPopup.visible && (
                 <div className={`absolute bottom-full left-0 mb-2 w-36 bg-[#111622] border border-[#1E2840] rounded-md overflow-hidden z-[1002] shadow-2xl ${providerPopup.className}`}>
                   {providerChoices.map((id) => {
-                    const p = PROVIDERS.find((q) => q.id === id);
-                    if (!p) return null;
+                    // The server union may name a user-created backend the
+                    // static PROVIDERS list does not know — its label comes
+                    // from the bootstrap report (providerMeta).
+                    const p = providerMeta(id);
                     return (
                     <button
                       key={p.id}
@@ -1362,11 +1446,7 @@ export default function GenerateNode({ id, data, selected }: NodeProps<GenerateN
                       <span className="text-[9px] text-[#4A4A45] tracking-wider uppercase font-semibold">Resolution</span>
                     </div>
                   )}
-                  {[
-                    { id: "1k", label: "1K", meta: "Standard" },
-                    { id: "2k", label: "2K", meta: "High" },
-                    { id: "4k", label: "4K", meta: "Maximum" },
-                  ].filter((q) => !caps.qualityOptions || caps.qualityOptions.includes(q.id as "1k" | "2k" | "4k")).map((q) => (
+                  {qualityChoices.map((q) => (
                     <button
                       key={q.id}
                       onMouseDown={(e) => e.stopPropagation()}

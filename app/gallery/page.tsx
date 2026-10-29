@@ -4071,7 +4071,7 @@ function GalleryInner() {
                 {/* Backend picker — any model with ≥2 bound backends (P5 C7) */}
                 {modelHasProviderChoice(modelId) && galleryProviderChoices.length >= 2 && (
                   <CustomDropdown
-                    value={providerId}
+                    value={providerId ?? ""}
                     onChange={(v) => setModelProvider(modelId, v as (typeof PROVIDERS)[number]["id"])}
                     disabled={submitting}
                     options={galleryProviderChoices.flatMap((id) => {

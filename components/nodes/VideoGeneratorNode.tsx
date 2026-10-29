@@ -8,7 +8,7 @@ import { Handle, Position, NodeProps, Node, useUpdateNodeInternals } from "@xyfl
 import CornerResizer from "./CornerResizer";
 import NodeActionBar from "./NodeActionBar";
 import { useWorkflowStore, NodeData } from "@/lib/store";
-import { PROVIDERS, getModelProvider, setModelProvider, modelHasProviderChoice, enabledProvidersForModel, isModelReady, isModelEnabled, defaultModelId } from "@/lib/providers";
+import { getModelProvider, setModelProvider, modelHasProviderChoice, enabledProvidersForModel, isModelReady, isModelEnabled, defaultModelId, providerMeta } from "@/lib/providers";
 import { ProviderBrandIcon, NodeProviderIcon } from "@/components/ui/ProviderIcon";
 import { resolveInputs } from "@/lib/executor";
 import { useReadOnly } from "@/lib/readOnlyContext";
@@ -1907,14 +1907,13 @@ export default function VideoGeneratorNode({ id, data, selected }: NodeProps<Vid
                     <Pill onClick={() => { setProviderOpen((o) => !o); setModelOpen(false); setRatioOpen(false); setDurOpen(false); setModeOpen(false); setGrokResOpen(false); }}>
                       <span className="flex items-center gap-1.5 text-[11px] text-white/70">
                         <ProviderBrandIcon id={currentProvider} size={11} />
-                        {PROVIDERS.find((p) => p.id === currentProvider)?.label ?? "Kie.ai"}
+                        {currentProvider ? providerMeta(currentProvider).label : ""}
                       </span>
                       <ChevronIcon open={providerOpen} />
                     </Pill>
                     <FloatMenu open={providerOpen}>
                       {providerChoices.map((id) => {
-                        const p = PROVIDERS.find((q) => q.id === id);
-                        if (!p) return null;
+                        const p = providerMeta(id);
                         return (
                           <button
                             key={p.id}
